@@ -111,6 +111,18 @@ func (s *Store) Path() string {
 	return s.path
 }
 
+// Ping verifies that both the writer and reader database connections are alive
+// by executing a simple SELECT 1 query on each.
+func (s *Store) Ping() error {
+	if err := s.writer.Ping(); err != nil {
+		return fmt.Errorf("store: writer ping: %w", err)
+	}
+	if err := s.reader.Ping(); err != nil {
+		return fmt.Errorf("store: reader ping: %w", err)
+	}
+	return nil
+}
+
 // Prune removes data older than retentionDays from requests, cache,
 // and pii_log tables. It returns the total number of rows deleted.
 func (s *Store) Prune(retentionDays int) (int64, error) {

@@ -34,6 +34,7 @@ func NewServer(handler *ProxyHandler, addr string, readTimeout, writeTimeout, id
 	r.Post("/v1/chat/completions", handler.HandleRequest)
 	r.Get("/v1/models", handler.HandleModels)
 	r.Get("/health", handler.HandleHealth)
+	r.Get("/health/ready", handler.HandleReady)
 
 	// Stream session routes (SSE-based bidirectional streaming).
 	r.Post("/v1/stream/create", handler.HandleStreamCreate)

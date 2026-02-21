@@ -160,6 +160,10 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 		cb := h.cbRegistry.Get(cand.name)
 		if !cb.Allow() {
 			logger.Debug().Str("provider", cand.name).Msg("circuit breaker open, skipping provider")
+			if h.collector != nil {
+				h.collector.RecordProviderRequest(cand.name, "circuit_open")
+				h.collector.SetCircuitState(cand.name, float64(cb.State()))
+			}
 			continue
 		}
 
@@ -175,6 +179,10 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 			if err != nil {
 				lastErr = err
 				cb.RecordFailure()
+				if h.collector != nil {
+					h.collector.RecordProviderRequest(cand.name, "error")
+					h.collector.SetCircuitState(cand.name, float64(cb.State()))
+				}
 				logger.Warn().Err(err).Str("provider", cand.name).Int("attempt", attempt+1).Msg("upstream forward error, retrying")
 				continue
 			}
@@ -184,11 +192,19 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 				// since we can't replay the stream. Only retry connection-level failures.
 				if pipeReq.Stream {
 					cb.RecordFailure()
+					if h.collector != nil {
+						h.collector.RecordProviderRequest(cand.name, "error")
+						h.collector.SetCircuitState(cand.name, float64(cb.State()))
+					}
 					return resp, nil // return the error response; caller handles it
 				}
 
 				lastErr = fmt.Errorf("upstream returned status %d", resp.StatusCode)
 				cb.RecordFailure()
+				if h.collector != nil {
+					h.collector.RecordProviderRequest(cand.name, "error")
+					h.collector.SetCircuitState(cand.name, float64(cb.State()))
+				}
 
 				// Respect Retry-After header if present.
 				if ra := retryAfterDuration(resp); ra > 0 {
@@ -206,6 +222,10 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 
 			// Non-retryable response (success or non-transient error).
 			cb.RecordSuccess()
+			if h.collector != nil {
+				h.collector.RecordProviderRequest(cand.name, "success")
+				h.collector.SetCircuitState(cand.name, float64(cb.State()))
+			}
 			return resp, nil
 		}
 
@@ -250,6 +270,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	format := DetectFormat(r)
 	if format == pipeline.FormatUnknown {
 		logger.Warn().Msg("unknown API format")
+		if h.collector != nil {
+			h.collector.RecordError("parse", "", http.StatusBadRequest)
+		}
 		writeJSONError(w, http.StatusBadRequest, "unsupported API endpoint")
 		return
 	}
@@ -262,10 +285,16 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
+			if h.collector != nil {
+				h.collector.RecordError("parse", "", http.StatusRequestEntityTooLarge)
+			}
 			writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
 			return
 		}
 		logger.Error().Err(err).Msg("failed to read request body")
+		if h.collector != nil {
+			h.collector.RecordError("parse", "", http.StatusBadRequest)
+		}
 		writeJSONError(w, http.StatusBadRequest, "failed to read request body")
 		return
 	}
@@ -284,6 +313,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to parse request")
+		if h.collector != nil {
+			h.collector.RecordError("parse", "", http.StatusBadRequest)
+		}
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -324,6 +356,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		var budgetErr *security.BudgetError
 		if errors.As(err, &budgetErr) {
 			logger.Warn().Str("period", budgetErr.Period).Float64("spent", budgetErr.Spent).Float64("limit", budgetErr.Limit).Msg("budget limit exceeded")
+			if h.collector != nil {
+				h.collector.RecordError("budget", "", http.StatusTooManyRequests)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", "60")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -331,8 +366,21 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		logger.Error().Err(err).Msg("pipeline request processing failed")
+		if h.collector != nil {
+			h.collector.RecordError("pipeline", "", http.StatusInternalServerError)
+		}
 		writeJSONError(w, http.StatusInternalServerError, "internal pipeline error")
 		return
+	}
+
+	// Record per-middleware request-phase timings.
+	if h.collector != nil {
+		for name, dur := range h.chain.Timings() {
+			if strings.HasSuffix(name, ".response") {
+				continue // skip response-phase timings recorded from previous requests
+			}
+			h.collector.ObserveMiddlewareTime(name, "request", dur.Seconds())
+		}
 	}
 
 	// Step 5: If the pipeline returned a cached response, write it directly.
@@ -384,6 +432,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		logger.Error().Err(err).Msg("upstream request failed")
+		if h.collector != nil {
+			h.collector.RecordError("upstream", "", http.StatusBadGateway)
+		}
 		writeJSONError(w, http.StatusBadGateway, "upstream request failed")
 		return
 	}
@@ -395,6 +446,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Step 7b: If the upstream returned an error, propagate it directly.
 	if upstreamResp.StatusCode >= 400 {
 		logger.Warn().Int("upstream_status", upstreamResp.StatusCode).Msg("upstream returned error")
+		if h.collector != nil {
+			h.collector.RecordError("upstream", "", upstreamResp.StatusCode)
+		}
 
 		var errReader io.Reader = upstreamResp.Body
 		if h.maxResponseSize > 0 {
@@ -416,12 +470,14 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 		// Record metrics even for error responses.
 		if h.collector != nil {
+			latency := time.Since(startTime)
 			errResp := &pipeline.Response{
 				RequestID:  requestID,
 				StatusCode: upstreamResp.StatusCode,
-				Latency:    time.Since(startTime),
+				Latency:    latency,
 			}
 			h.collector.Record(pipeReq, errResp)
+			h.collector.ObserveLatency("", pipeReq.Model, pipeReq.Stream, latency.Seconds())
 		}
 
 		// Persist request record for upstream errors.
@@ -479,6 +535,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		if _, respErr := h.chain.ProcessResponse(ctx, pipeReq, pipeResp); respErr != nil {
 			logger.Error().Err(respErr).Msg("pipeline response processing failed (streaming)")
 		}
+		h.recordResponseTimings()
 
 		// Record metrics.
 		if h.collector != nil {
@@ -508,6 +565,11 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				RequestBody:  bodyForStore(body),
 				Project:      project,
 			})
+		}
+
+		// Observe request latency.
+		if h.collector != nil {
+			h.collector.ObserveLatency(pipeResp.Provider, pipeReq.Model, true, pipeResp.Latency.Seconds())
 		}
 
 		logger.Info().
@@ -547,9 +609,13 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	pipeResp, err = h.chain.ProcessResponse(ctx, pipeReq, pipeResp)
 	if err != nil {
 		logger.Error().Err(err).Msg("pipeline response processing failed")
+		if h.collector != nil {
+			h.collector.RecordError("pipeline", "", http.StatusInternalServerError)
+		}
 		writeJSONError(w, http.StatusInternalServerError, "internal pipeline error")
 		return
 	}
+	h.recordResponseTimings()
 
 	// Copy upstream response headers that are relevant.
 	for _, key := range []string{"X-Request-Id", "Request-Id"} {
@@ -596,6 +662,11 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		logger.Error().Err(writeErr).Msg("failed to write response body")
 	}
 
+	// Observe request latency.
+	if h.collector != nil {
+		h.collector.ObserveLatency(pipeResp.Provider, pipeReq.Model, false, pipeResp.Latency.Seconds())
+	}
+
 	logger.Info().
 		Dur("latency", pipeResp.Latency).
 		Int("status", pipeResp.StatusCode).
@@ -607,6 +678,70 @@ func (h *ProxyHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// recordResponseTimings reads the chain's response-phase timings and observes them.
+func (h *ProxyHandler) recordResponseTimings() {
+	if h.collector == nil {
+		return
+	}
+	for name, dur := range h.chain.Timings() {
+		if strings.HasSuffix(name, ".response") {
+			mwName := strings.TrimSuffix(name, ".response")
+			h.collector.ObserveMiddlewareTime(mwName, "response", dur.Seconds())
+		}
+	}
+}
+
+// HandleReady is a readiness probe that checks database connectivity and
+// provider availability. Returns 200 if all checks pass, 503 with details
+// if any fail. Intended for use as a Kubernetes readiness probe.
+func (h *ProxyHandler) HandleReady(w http.ResponseWriter, r *http.Request) {
+	type checkResult struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+		Error  string `json:"error,omitempty"`
+	}
+
+	var checks []checkResult
+	allOK := true
+
+	// Check database connectivity.
+	if h.store != nil {
+		if err := h.store.Ping(); err != nil {
+			checks = append(checks, checkResult{Name: "database", Status: "fail", Error: err.Error()})
+			allOK = false
+		} else {
+			checks = append(checks, checkResult{Name: "database", Status: "ok"})
+		}
+	} else {
+		checks = append(checks, checkResult{Name: "database", Status: "ok", Error: "no store configured"})
+	}
+
+	// Check provider availability.
+	providerCount := len(h.providers)
+	if providerCount > 0 {
+		checks = append(checks, checkResult{Name: "providers", Status: "ok"})
+	} else {
+		checks = append(checks, checkResult{Name: "providers", Status: "fail", Error: "no providers configured"})
+		allOK = false
+	}
+
+	status := http.StatusOK
+	statusStr := "ready"
+	if !allOK {
+		status = http.StatusServiceUnavailable
+		statusStr = "not_ready"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	resp := map[string]interface{}{
+		"status": statusStr,
+		"checks": checks,
+	}
+	data, _ := json.Marshal(resp)
+	_, _ = w.Write(data)
 }
 
 // HandleModels proxies the /v1/models request to the appropriate upstream provider.

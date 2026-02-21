@@ -27,66 +27,19 @@
 - `ResilienceConfig` with retry/circuit-breaker tuning knobs
 - Full test coverage: pipeline panic tests, circuit breaker state machine tests, retry/backoff tests, handler retry/exhaustion/status-propagation tests
 
----
+### Phase 3: Observability (Done)
 
-## Phase 3: Observability
+- `tokenman_errors_total{type, provider, status_code}` counter — incremented for parse, budget, pipeline, upstream, and timeout errors
+- `tokenman_request_duration_seconds{provider, model, streaming}` histogram — buckets tuned for LLM latency (100ms to 120s), observed on all request paths
+- `tokenman_provider_requests_total{provider, status}` counter — tracks success, error, circuit_open per provider
+- `tokenman_provider_circuit_state{provider}` gauge — 0=closed, 1=open, 2=half-open
+- `tokenman_middleware_duration_seconds{middleware, phase}` histogram — per-middleware request/response phase timing
+- `GET /health/ready` readiness probe — checks DB connectivity (`Ping()`) and provider availability, returns 200/503 with JSON details
+- `Store.Ping()` method for database health checks
+- Custom Prometheus text exposition: labeled counters, histograms (with cumulative bucket counts, sum, count), and gauges — no external Prometheus client library dependency
+- All existing tests pass, plus new readiness probe tests
 
-### 3.1 Error rate counter metrics
-
-**Issue:** No `tokenman_errors_total` counter by error type. Operators can't alert on error rate spikes.
-
-**Plan:**
-- Add a Prometheus `CounterVec` to `internal/metrics/collector.go` with labels `{type, provider, status_code}`
-- Increment in `handler.go` on upstream errors, pipeline errors, parse errors, and timeout errors
-- Register the counter in `PrometheusHandler`
-
-**Files:** `internal/metrics/collector.go`, `internal/metrics/prometheus.go`, `internal/proxy/handler.go`
-
-### 3.2 Latency histogram metrics
-
-**Issue:** No p50/p95/p99 latency data. Essential for SLO enforcement.
-
-**Plan:**
-- Add a Prometheus `HistogramVec` with labels `{provider, model, streaming}` and buckets tuned for LLM latency (100ms to 120s)
-- Observe in `handler.go` at request completion (both streaming and non-streaming paths)
-- Register in `PrometheusHandler`
-
-**Files:** `internal/metrics/collector.go`, `internal/metrics/prometheus.go`, `internal/proxy/handler.go`
-
-### 3.3 Per-provider health and error metrics
-
-**Issue:** No visibility into which providers are healthy vs degraded.
-
-**Plan:**
-- Add `tokenman_provider_requests_total{provider, status}` and `tokenman_provider_circuit_state{provider}` gauges
-- Emit provider name from `forwardWithRetry` and the simple forward path
-- Expose circuit breaker state as a labeled gauge (0=closed, 1=open, 2=half-open)
-
-**Files:** `internal/metrics/collector.go`, `internal/proxy/handler.go`, `internal/proxy/circuitbreaker.go`
-
-### 3.4 Readiness probe
-
-**Issue:** `/health` returns `{"status":"ok"}` without checking DB or upstream connectivity. Kubernetes can't detect an unready state.
-
-**Plan:**
-- Add `GET /health/ready` endpoint to `proxy/server.go`
-- Check: SQLite writer connection alive (simple `SELECT 1`), at least one provider configured
-- Return 200 if all checks pass, 503 with details if any fail
-- Keep `/health` as a liveness probe (always 200 if process is running)
-
-**Files:** `internal/proxy/handler.go`, `internal/proxy/server.go`, `internal/store/store.go` (add `Ping()` method)
-
-### 3.5 Per-middleware timing as Prometheus metrics
-
-**Issue:** Pipeline timing is tracked internally but not exposed to Prometheus.
-
-**Plan:**
-- After `ProcessRequest` and `ProcessResponse`, read `chain.Timings()` and observe into a `HistogramVec` with label `{middleware, phase}`
-- Only do this if a Prometheus collector is configured (avoid allocation in hot path when metrics are off)
-
-**Files:** `internal/proxy/handler.go`, `internal/metrics/collector.go`
-
-### 3.6 OpenTelemetry tracing (optional)
+### 3.6 OpenTelemetry tracing (deferred — optional)
 
 **Issue:** No distributed tracing or correlation ID propagation.
 

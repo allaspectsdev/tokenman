@@ -416,6 +416,51 @@ func TestRetry_Exhausted_Returns502(t *testing.T) {
 	}
 }
 
+func TestReadinessProbe_Returns200WhenProvidersConfigured(t *testing.T) {
+	chain := pipeline.NewChain()
+	handler := newTestHandler(chain, "http://localhost:1234")
+	ts := newTestServer(handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/health/ready")
+	if err != nil {
+		t.Fatalf("GET /health/ready failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, http.StatusOK, string(body))
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["status"] != "ready" {
+		t.Errorf("status = %v; want %q", result["status"], "ready")
+	}
+}
+
+func TestReadinessProbe_Returns503WhenNoProviders(t *testing.T) {
+	chain := pipeline.NewChain()
+	handler := newTestHandler(chain, "") // no providers
+	ts := newTestServer(handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/health/ready")
+	if err != nil {
+		t.Fatalf("GET /health/ready failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, http.StatusServiceUnavailable, string(body))
+	}
+}
+
 func TestInvalidRequestBody_Returns400(t *testing.T) {
 	chain := pipeline.NewChain()
 	handler := newTestHandler(chain, "")

@@ -87,7 +87,7 @@ func (d *DedupMiddleware) ProcessRequest(_ context.Context, req *pipeline.Reques
 			cacheEligible += tokenCount
 			if req.Format == pipeline.FormatAnthropic {
 				if req.SystemBlocks[i].CacheControl == nil {
-					req.SystemBlocks[i].CacheControl = make(map[string]string)
+					req.SystemBlocks[i].CacheControl = make(map[string]interface{})
 				}
 				req.SystemBlocks[i].CacheControl["type"] = "ephemeral"
 			}
@@ -164,7 +164,7 @@ func annotateCacheControl(blocks []pipeline.ContentBlock, systemText string) []p
 			{
 				Type: "text",
 				Text: systemText,
-				CacheControl: map[string]string{
+				CacheControl: map[string]interface{}{
 					"type": "ephemeral",
 				},
 			},
@@ -176,7 +176,7 @@ func annotateCacheControl(blocks []pipeline.ContentBlock, systemText string) []p
 	for i := len(blocks) - 1; i >= 0; i-- {
 		if blocks[i].Type == "text" {
 			if blocks[i].CacheControl == nil {
-				blocks[i].CacheControl = make(map[string]string)
+				blocks[i].CacheControl = make(map[string]interface{})
 			}
 			blocks[i].CacheControl["type"] = "ephemeral"
 			break

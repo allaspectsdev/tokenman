@@ -128,6 +128,10 @@ Two-tier cache (in-memory LRU + SQLite) with configurable TTL. Identical request
 | **Heartbeat dedup** | Collapses near-identical polling requests within a time window |
 | **Conversation summarization** | Summarizes older messages using a lightweight LLM call when conversations exceed a threshold |
 
+### Header & Body Passthrough
+
+TokenMan forwards `anthropic-version` and `anthropic-beta` headers from the client to the upstream API. This ensures compatibility with the latest Anthropic features (extended thinking, prompt caching variants, etc.) without requiring TokenMan updates. Unknown request body fields (e.g. `thinking`, `tool_choice`, `top_k`, `stop_sequences`) are also preserved through the pipeline — TokenMan only modifies fields it manages and passes everything else through unchanged.
+
 ### Security
 
 - **PII detection** — Identifies emails, phone numbers, SSNs, credit card numbers, and API keys. Actions: `redact`, `hash`, `log`, or `block`.

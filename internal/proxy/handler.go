@@ -296,7 +296,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Copy relevant headers from the original request.
-	for _, key := range []string{"X-Request-Id", "User-Agent", "Accept"} {
+	for _, key := range []string{"X-Request-Id", "User-Agent", "Accept", "Anthropic-Version", "Anthropic-Beta"} {
 		if val := r.Header.Get(key); val != "" {
 			pipeReq.Headers[key] = val
 		}
@@ -863,12 +863,19 @@ func rebuildRequestBody(req *pipeline.Request) []byte {
 }
 
 func rebuildAnthropicBody(req *pipeline.Request) []byte {
-	body := map[string]interface{}{
-		"model":      req.Model,
-		"messages":   req.Messages,
-		"stream":     req.Stream,
-		"max_tokens": req.MaxTokens,
+	// Start from the original body to preserve unknown fields (e.g. thinking,
+	// tool_choice, top_p, top_k, stop_sequences, etc.).
+	var body map[string]interface{}
+	if err := json.Unmarshal(req.RawBody, &body); err != nil {
+		body = make(map[string]interface{})
 	}
+
+	// Override fields that the pipeline may have modified.
+	body["model"] = req.Model
+	body["messages"] = req.Messages
+	body["stream"] = req.Stream
+	body["max_tokens"] = req.MaxTokens
+
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
 	}

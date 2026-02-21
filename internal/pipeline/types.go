@@ -34,7 +34,7 @@ type ContentBlock struct {
 	Input        interface{}            `json:"input,omitempty"`
 	ToolUseID    string                 `json:"tool_use_id,omitempty"`
 	Content      interface{}            `json:"content,omitempty"`
-	CacheControl map[string]string      `json:"cache_control,omitempty"`
+	CacheControl map[string]interface{} `json:"cache_control,omitempty"`
 }
 
 // ToolCall represents a tool call.

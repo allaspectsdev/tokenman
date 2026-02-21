@@ -58,7 +58,13 @@ func (u *UpstreamClient) Forward(ctx context.Context, req *pipeline.Request, bas
 	switch req.Format {
 	case pipeline.FormatAnthropic:
 		httpReq.Header.Set("x-api-key", apiKey)
-		httpReq.Header.Set("anthropic-version", "2023-06-01")
+		// Use the original anthropic-version if forwarded from the client,
+		// otherwise fall back to a default.
+		if v, ok := req.Headers["Anthropic-Version"]; ok {
+			httpReq.Header.Set("anthropic-version", v)
+		} else {
+			httpReq.Header.Set("anthropic-version", "2023-06-01")
+		}
 	case pipeline.FormatOpenAI:
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	default:

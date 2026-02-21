@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/allaspects/tokenman/internal/tracing"
 )
 
 // recoverMiddleware runs fn inside a deferred recover so that a panicking
@@ -59,12 +61,13 @@ func (c *Chain) ProcessRequest(ctx context.Context, req *Request) (*Request, *Ca
 		}
 
 		name := mw.Name()
+		mwCtx, mwSpan := tracing.StartMiddlewareSpan(ctx, name, "request")
 		start := time.Now()
 
 		var innerReq *Request
 		err := recoverMiddleware(name, func() error {
 			var mwErr error
-			innerReq, mwErr = mw.ProcessRequest(ctx, req)
+			innerReq, mwErr = mw.ProcessRequest(mwCtx, req)
 			return mwErr
 		})
 		elapsed := time.Since(start)
@@ -74,8 +77,11 @@ func (c *Chain) ProcessRequest(ctx context.Context, req *Request) (*Request, *Ca
 		c.recordTiming(name, elapsed)
 
 		if err != nil {
+			tracing.RecordError(mwCtx, err)
+			mwSpan.End()
 			return nil, nil, fmt.Errorf("middleware %s: request processing failed: %w", name, err)
 		}
+		mwSpan.End()
 
 		req = innerReq
 		if req == nil {
@@ -116,12 +122,13 @@ func (c *Chain) ProcessResponse(ctx context.Context, req *Request, resp *Respons
 		}
 
 		name := mw.Name()
+		mwCtx, mwSpan := tracing.StartMiddlewareSpan(ctx, name, "response")
 		start := time.Now()
 
 		var innerResp *Response
 		err := recoverMiddleware(name, func() error {
 			var mwErr error
-			innerResp, mwErr = mw.ProcessResponse(ctx, req, resp)
+			innerResp, mwErr = mw.ProcessResponse(mwCtx, req, resp)
 			return mwErr
 		})
 		elapsed := time.Since(start)
@@ -131,8 +138,11 @@ func (c *Chain) ProcessResponse(ctx context.Context, req *Request, resp *Respons
 		c.recordTiming(name+".response", elapsed)
 
 		if err != nil {
+			tracing.RecordError(mwCtx, err)
+			mwSpan.End()
 			return nil, fmt.Errorf("middleware %s: response processing failed: %w", name, err)
 		}
+		mwSpan.End()
 
 		resp = innerResp
 		if resp == nil {

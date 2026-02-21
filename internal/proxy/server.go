@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/allaspects/tokenman/internal/tracing"
 )
 
 // Server is the HTTP server for the TokenMan proxy. It binds the chi router
@@ -21,13 +23,19 @@ type Server struct {
 
 // NewServer creates a new Server with the given ProxyHandler, listen address,
 // and HTTP timeout durations. Zero-value timeouts leave the corresponding
-// http.Server field at its default (no timeout).
-func NewServer(handler *ProxyHandler, addr string, readTimeout, writeTimeout, idleTimeout time.Duration) *Server {
+// http.Server field at its default (no timeout). If tracingEnabled is true,
+// the OpenTelemetry HTTP middleware is added to extract/inject trace context.
+func NewServer(handler *ProxyHandler, addr string, readTimeout, writeTimeout, idleTimeout time.Duration, tracingEnabled bool) *Server {
 	r := chi.NewRouter()
 
 	// Standard chi middleware.
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+
+	// OpenTelemetry trace context extraction/injection.
+	if tracingEnabled {
+		r.Use(tracing.HTTPMiddleware)
+	}
 
 	// Mount proxy routes.
 	r.Post("/v1/messages", handler.HandleRequest)

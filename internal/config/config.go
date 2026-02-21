@@ -44,6 +44,7 @@ type Config struct {
 	Compression CompressionConfig         `mapstructure:"compression" toml:"compression"`
 	Security    SecurityConfig            `mapstructure:"security"    toml:"security"`
 	Resilience  ResilienceConfig          `mapstructure:"resilience"  toml:"resilience"`
+	Tracing     TracingConfig             `mapstructure:"tracing"     toml:"tracing"`
 	Dashboard   DashboardConfig           `mapstructure:"dashboard"   toml:"dashboard"`
 	Metrics     MetricsConfig             `mapstructure:"metrics"     toml:"metrics"`
 	Plugins     PluginConfig              `mapstructure:"plugins"     toml:"plugins"`
@@ -193,6 +194,16 @@ type BudgetConfig struct {
 	DailyLimit      int       `mapstructure:"daily_limit"      toml:"daily_limit"`
 	MonthlyLimit    int       `mapstructure:"monthly_limit"    toml:"monthly_limit"`
 	AlertThresholds []float64 `mapstructure:"alert_thresholds" toml:"alert_thresholds"`
+}
+
+// TracingConfig controls OpenTelemetry distributed tracing.
+type TracingConfig struct {
+	Enabled     bool    `mapstructure:"enabled"      toml:"enabled"`
+	Exporter    string  `mapstructure:"exporter"     toml:"exporter"`     // "stdout", "otlp-grpc", "otlp-http"
+	Endpoint    string  `mapstructure:"endpoint"     toml:"endpoint"`     // e.g. "localhost:4317"
+	ServiceName string  `mapstructure:"service_name" toml:"service_name"` // defaults to "tokenman"
+	SampleRate  float64 `mapstructure:"sample_rate"  toml:"sample_rate"`  // 0.0 to 1.0
+	Insecure    bool    `mapstructure:"insecure"     toml:"insecure"`     // skip TLS for dev
 }
 
 // DashboardConfig controls the web dashboard.
@@ -452,6 +463,14 @@ func setViperDefaults(v *viper.Viper) {
 	// Server (new resilience-related fields)
 	v.SetDefault("server.max_response_size", d.Server.MaxResponseSize)
 	v.SetDefault("server.stream_timeout", d.Server.StreamTimeout)
+
+	// Tracing
+	v.SetDefault("tracing.enabled", d.Tracing.Enabled)
+	v.SetDefault("tracing.exporter", d.Tracing.Exporter)
+	v.SetDefault("tracing.endpoint", d.Tracing.Endpoint)
+	v.SetDefault("tracing.service_name", d.Tracing.ServiceName)
+	v.SetDefault("tracing.sample_rate", d.Tracing.SampleRate)
+	v.SetDefault("tracing.insecure", d.Tracing.Insecure)
 
 	// Plugins
 	v.SetDefault("plugins.enabled", d.Plugins.Enabled)

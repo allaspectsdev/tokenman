@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspects/tokenman/internal/tracing"
 )
 
 // UpstreamClient manages forwarding requests to upstream LLM API providers.
@@ -74,6 +75,13 @@ func (u *UpstreamClient) Forward(ctx context.Context, req *pipeline.Request, bas
 		httpReq.Header.Set(key, val)
 	}
 
+	// Inject trace context (traceparent / tracestate) into the upstream request.
+	tracing.InjectHeaders(ctx, httpReq)
+
+	// Create a span for the upstream call.
+	ctx, span := tracing.StartUpstreamSpan(ctx, upstreamURL, string(req.Format))
+	defer span.End()
+
 	// For streaming requests, use a client without a timeout so the connection
 	// can stay open for the duration of the stream.
 	client := u.client
@@ -84,8 +92,9 @@ func (u *UpstreamClient) Forward(ctx context.Context, req *pipeline.Request, bas
 		}
 	}
 
-	resp, err := client.Do(httpReq)
+	resp, err := client.Do(httpReq.WithContext(ctx))
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		return nil, fmt.Errorf("forwarding to upstream %s: %w", upstreamURL, err)
 	}
 

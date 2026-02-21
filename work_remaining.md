@@ -58,19 +58,21 @@
 
 ---
 
-## Remaining (Optional / Low Priority)
+## OpenTelemetry Tracing (Done)
 
-### OpenTelemetry tracing (deferred)
+- New `internal/tracing/` package with `Init()` (tracer provider setup), `HTTPMiddleware` (chi middleware for W3C trace context extraction/injection), and span helpers for pipeline, middleware, and upstream calls
+- `TracingConfig` added to config with `enabled`, `exporter` (stdout/otlp-grpc/otlp-http), `endpoint`, `service_name`, `sample_rate`, `insecure`
+- Disabled by default — zero overhead when `tracing.enabled = false`
+- Spans created for: each middleware ProcessRequest/ProcessResponse, upstream HTTP calls, root HTTP server span
+- `traceparent` / `tracestate` headers injected into upstream requests and extracted from incoming requests
+- Request attributes: request_id, model, format, stream
+- Response attributes: status_code, tokens_in, tokens_out, cache_hit, provider
+- Error recording on trace spans for middleware and upstream failures
+- Wired into daemon: tracer initialization with graceful shutdown, chi middleware on proxy server
+- Full test coverage: tracer init/shutdown, middleware span creation, trace context extraction/injection, attribute recording
+- Example config section in `configs/tokenman.example.toml`
 
-**Issue:** No distributed tracing or correlation ID propagation.
-
-**Plan:**
-- Add optional `otel` dependency behind a build tag or config flag
-- Inject trace context via chi middleware
-- Create spans for: pipeline processing, upstream forward, each middleware
-- Propagate `X-Request-Id` / `traceparent` headers to upstream
-
-**Files:** New `internal/tracing/` package, `internal/proxy/handler.go`, `internal/daemon/daemon.go`, `go.mod`
+**Files:** `internal/tracing/tracer.go`, `internal/tracing/middleware.go`, `internal/tracing/spans.go`, `internal/tracing/*_test.go`, `internal/config/config.go`, `internal/config/defaults.go`, `internal/config/validate.go`, `internal/pipeline/chain.go`, `internal/proxy/upstream.go`, `internal/proxy/handler.go`, `internal/proxy/server.go`, `internal/daemon/daemon.go`, `go.mod`
 
 ---
 

@@ -184,6 +184,23 @@ alert_thresholds = [50.0, 75.0, 90.0]
 # cb_half_open_max_calls = 1
 
 # ----------------------------------------------------------------------------
+# Tracing  (OpenTelemetry distributed tracing)
+# ----------------------------------------------------------------------------
+# [tracing]
+# Enable distributed tracing via OpenTelemetry.
+# enabled = false
+# Exporter type: "stdout", "otlp-grpc", "otlp-http".
+# exporter = "otlp-grpc"
+# Collector endpoint (e.g. "localhost:4317" for gRPC, "localhost:4318" for HTTP).
+# endpoint = "localhost:4317"
+# Service name reported in traces.
+# service_name = "tokenman"
+# Sampling rate: 0.0 (none) to 1.0 (all requests).
+# sample_rate = 1.0
+# Skip TLS verification for the collector connection (development only).
+# insecure = false
+
+# ----------------------------------------------------------------------------
 # Dashboard
 # ----------------------------------------------------------------------------
 [dashboard]

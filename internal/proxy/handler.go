@@ -17,6 +17,7 @@ import (
 	"github.com/allaspects/tokenman/internal/security"
 	"github.com/allaspects/tokenman/internal/store"
 	"github.com/allaspects/tokenman/internal/tokenizer"
+	"github.com/allaspects/tokenman/internal/tracing"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -369,6 +370,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		Bool("stream", pipeReq.Stream).
 		Logger()
 
+	// Enrich the current trace span with request-level attributes.
+	tracing.SetRequestAttributes(ctx, requestID, pipeReq.Model, string(format), pipeReq.Stream)
+
 	logger.Info().Msg("processing request")
 
 	// Step 4: Run the pipeline chain's request phase.
@@ -684,6 +688,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			logger.Error().Err(err).Msg("failed to persist request record")
 		}
 	}
+
+	// Enrich the trace span with response-level attributes.
+	tracing.SetResponseAttributes(ctx, pipeResp.StatusCode, pipeReq.TokensIn, pipeResp.TokensOut, pipeResp.CacheHit, pipeResp.Provider)
 
 	// Write the response body.
 	w.Header().Set("Content-Type", "application/json")

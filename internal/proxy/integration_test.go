@@ -65,7 +65,7 @@ func setupIntegration(t *testing.T, upstreamHandler http.HandlerFunc) (*Server, 
 		},
 	})
 
-	srv := NewServer(handler, ":0", 0, 0, 0)
+	srv := NewServer(handler, ":0", 0, 0, 0, false)
 	return srv, upstream
 }
 
@@ -377,7 +377,7 @@ func TestIntegration_RequestPersistence(t *testing.T) {
 		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
 	})
 
-	srv := NewServer(handler, ":0", 0, 0, 0)
+	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hi"}],"max_tokens":100,"stream":false}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
@@ -425,7 +425,7 @@ func TestIntegration_ProjectHeader(t *testing.T) {
 	handler.SetProviders(map[string]ProviderConfig{
 		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
 	})
-	srv := NewServer(handler, ":0", 0, 0, 0)
+	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hi"}],"max_tokens":100,"stream":false}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
@@ -470,7 +470,7 @@ func TestIntegration_MaxBodySize(t *testing.T) {
 	handler.SetProviders(map[string]ProviderConfig{
 		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
 	})
-	srv := NewServer(handler, ":0", 0, 0, 0)
+	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
 	// Build a body larger than 100 bytes.
 	largeBody := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"` + strings.Repeat("A", 200) + `"}],"max_tokens":100,"stream":false}`
@@ -505,7 +505,7 @@ func TestIntegration_ResponseSizeLimit(t *testing.T) {
 	handler.SetProviders(map[string]ProviderConfig{
 		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
 	})
-	srv := NewServer(handler, ":0", 0, 0, 0)
+	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hi"}],"max_tokens":100,"stream":false}`
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(body))
@@ -585,6 +585,6 @@ func setupIntegrationWithRetry(t *testing.T, upstreamHandler http.HandlerFunc) (
 		},
 	})
 
-	srv := NewServer(handler, ":0", 0, 0, 0)
+	srv := NewServer(handler, ":0", 0, 0, 0, false)
 	return srv, upstream
 }

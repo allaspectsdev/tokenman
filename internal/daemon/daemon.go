@@ -26,6 +26,7 @@ import (
 	"github.com/allaspects/tokenman/internal/security"
 	"github.com/allaspects/tokenman/internal/store"
 	"github.com/allaspects/tokenman/internal/tokenizer"
+	"github.com/allaspects/tokenman/internal/tracing"
 	"github.com/allaspects/tokenman/internal/vault"
 	"github.com/allaspects/tokenman/internal/version"
 )
@@ -123,6 +124,35 @@ func Run(cfg *config.Config, foreground bool) error {
 				// Hot-reload refresh is wired below after middleware creation.
 			})
 			log.Info().Str("file", configFile).Msg("config watcher started")
+		}
+	}
+
+	// 6b. Initialize OpenTelemetry tracing (if enabled).
+	if cfg.Tracing.Enabled {
+		shutdownTracer, tracerErr := tracing.Init(
+			context.Background(),
+			cfg.Tracing.ServiceName,
+			version.Version,
+			cfg.Tracing.Exporter,
+			cfg.Tracing.Endpoint,
+			cfg.Tracing.SampleRate,
+			cfg.Tracing.Insecure,
+		)
+		if tracerErr != nil {
+			log.Warn().Err(tracerErr).Msg("failed to initialize tracing; continuing without traces")
+		} else {
+			defer func() {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := shutdownTracer(shutdownCtx); err != nil {
+					log.Error().Err(err).Msg("tracing shutdown error")
+				}
+			}()
+			log.Info().
+				Str("exporter", cfg.Tracing.Exporter).
+				Str("endpoint", cfg.Tracing.Endpoint).
+				Float64("sample_rate", cfg.Tracing.SampleRate).
+				Msg("tracing initialized")
 		}
 	}
 
@@ -287,7 +317,7 @@ func Run(cfg *config.Config, foreground bool) error {
 	readTimeout := time.Duration(cfg.Server.ReadTimeout) * time.Second
 	writeTimeout := time.Duration(cfg.Server.WriteTimeout) * time.Second
 	idleTimeout := time.Duration(cfg.Server.IdleTimeout) * time.Second
-	proxyServer := proxy.NewServer(proxyHandler, proxyAddr, readTimeout, writeTimeout, idleTimeout)
+	proxyServer := proxy.NewServer(proxyHandler, proxyAddr, readTimeout, writeTimeout, idleTimeout, cfg.Tracing.Enabled)
 
 	// Start cache purger (reuses the pruneCtx).
 	purgerDone := cacheMW.StartPurger(pruneCtx)

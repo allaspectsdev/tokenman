@@ -136,6 +136,20 @@ func validate(cfg *Config) error {
 		errs = append(errs, fmt.Sprintf("resilience.cb_half_open_max_calls must be at least 1, got %d", cfg.Resilience.CBHalfOpenMax))
 	}
 
+	// Tracing validation
+	if cfg.Tracing.Enabled {
+		validExporters := []string{"stdout", "otlp-grpc", "otlp-http"}
+		if !isValidEnum(cfg.Tracing.Exporter, validExporters) {
+			errs = append(errs, fmt.Sprintf("tracing.exporter must be one of %v, got %q", validExporters, cfg.Tracing.Exporter))
+		}
+		if cfg.Tracing.ServiceName == "" {
+			errs = append(errs, "tracing.service_name must not be empty when tracing is enabled")
+		}
+	}
+	if cfg.Tracing.SampleRate < 0 || cfg.Tracing.SampleRate > 1 {
+		errs = append(errs, fmt.Sprintf("tracing.sample_rate must be between 0 and 1, got %f", cfg.Tracing.SampleRate))
+	}
+
 	// Metrics validation
 	if cfg.Metrics.RetentionDays < 1 {
 		errs = append(errs, fmt.Sprintf("metrics.retention_days must be at least 1, got %d", cfg.Metrics.RetentionDays))

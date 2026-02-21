@@ -70,6 +70,18 @@ const DefaultCBResetTimeout = 60
 // DefaultCBHalfOpenMax is the default number of successful calls in half-open state to close the circuit.
 const DefaultCBHalfOpenMax = 1
 
+// DefaultTracingExporter is the default tracing exporter type.
+const DefaultTracingExporter = "otlp-grpc"
+
+// DefaultTracingEndpoint is the default OTLP collector endpoint.
+const DefaultTracingEndpoint = "localhost:4317"
+
+// DefaultTracingServiceName is the default service name for traces.
+const DefaultTracingServiceName = "tokenman"
+
+// DefaultTracingSampleRate is the default sampling rate (1.0 = 100%).
+const DefaultTracingSampleRate = 1.0
+
 // DefaultBudgetAlertThresholds are the default alert thresholds (percentages).
 var DefaultBudgetAlertThresholds = []float64{50, 75, 90}
 
@@ -190,6 +202,14 @@ func DefaultConfig() *Config {
 			CBFailureThreshold: DefaultCBFailureThreshold,
 			CBResetTimeoutSec:  DefaultCBResetTimeout,
 			CBHalfOpenMax:      DefaultCBHalfOpenMax,
+		},
+		Tracing: TracingConfig{
+			Enabled:     false,
+			Exporter:    DefaultTracingExporter,
+			Endpoint:    DefaultTracingEndpoint,
+			ServiceName: DefaultTracingServiceName,
+			SampleRate:  DefaultTracingSampleRate,
+			Insecure:    false,
 		},
 		Dashboard: DashboardConfig{
 			Enabled:        true,

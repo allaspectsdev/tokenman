@@ -25,6 +25,25 @@ log_level = "info"
 # A leading ~ is expanded to the user's home directory.
 data_dir = "~/.tokenman"
 
+# TLS configuration. When enabled, both proxy and dashboard serve HTTPS.
+# tls_enabled = false
+# cert_file = "/path/to/cert.pem"
+# key_file  = "/path/to/key.pem"
+
+# HTTP server timeouts (seconds). Write timeout is high to support LLM streaming.
+# read_timeout  = 10
+# write_timeout = 300
+# idle_timeout  = 120
+
+# Maximum request body size in bytes (default 10 MB = 10485760). Set to 0 for unlimited.
+# max_body_size = 10485760
+
+# Maximum upstream response size in bytes (default 100 MB). Set to 0 for unlimited.
+# max_response_size = 104857600
+
+# Streaming connection timeout in seconds (default 600 = 10 min). Set to 0 for unlimited.
+# stream_timeout = 600
+
 # ----------------------------------------------------------------------------
 # Auth  (dashboard authentication)
 # ----------------------------------------------------------------------------
@@ -146,6 +165,25 @@ monthly_limit = 0
 alert_thresholds = [50.0, 75.0, 90.0]
 
 # ----------------------------------------------------------------------------
+# Resilience
+# ----------------------------------------------------------------------------
+# [resilience]
+# Maximum retry attempts per provider for transient errors (429, 502, 503, 504).
+# retry_max_attempts = 3
+# Base delay for exponential backoff in milliseconds.
+# retry_base_delay_ms = 500
+# Maximum delay for exponential backoff in milliseconds.
+# retry_max_delay_ms = 30000
+# Enable per-provider circuit breaker.
+# circuit_breaker_enabled = true
+# Number of consecutive failures before opening the circuit.
+# cb_failure_threshold = 5
+# Seconds before an open circuit transitions to half-open.
+# cb_reset_timeout_seconds = 60
+# Successful calls in half-open state needed to close the circuit.
+# cb_half_open_max_calls = 1
+
+# ----------------------------------------------------------------------------
 # Dashboard
 # ----------------------------------------------------------------------------
 [dashboard]
@@ -153,6 +191,9 @@ alert_thresholds = [50.0, 75.0, 90.0]
 enabled = true
 # Automatically open the dashboard in the default browser on start.
 auto_open = false
+# Allowed CORS origins. Use ["*"] to allow all (default, for local dev).
+# For production, restrict to your dashboard domain(s).
+# allowed_origins = ["https://dashboard.example.com"]
 
 # ----------------------------------------------------------------------------
 # Metrics

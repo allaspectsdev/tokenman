@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,28 +44,53 @@ type ProviderConfig struct {
 // API format, runs the pipeline chain, forwards requests to the upstream provider,
 // and handles both streaming and non-streaming responses.
 type ProxyHandler struct {
-	chain     *pipeline.Chain
-	client    *UpstreamClient
-	logger    zerolog.Logger
-	providers map[string]ProviderConfig
-	collector *metrics.Collector
-	tokenizer *tokenizer.Tokenizer
-	store     *store.Store
-	streams   *StreamManager
+	chain           *pipeline.Chain
+	client          *UpstreamClient
+	logger          zerolog.Logger
+	providers       map[string]ProviderConfig
+	collector       *metrics.Collector
+	tokenizer       *tokenizer.Tokenizer
+	store           *store.Store
+	streams         *StreamManager
+	maxBodySize     int64
+	maxResponseSize int64
+	streamTimeout   time.Duration
+	cbRegistry      *CircuitBreakerRegistry
+	retryConfig     RetryConfig
 }
 
 // NewProxyHandler creates a new ProxyHandler with the given pipeline chain,
-// upstream client, logger, metrics collector, tokenizer, and store.
-func NewProxyHandler(chain *pipeline.Chain, client *UpstreamClient, logger zerolog.Logger, collector *metrics.Collector, tok *tokenizer.Tokenizer, st *store.Store) *ProxyHandler {
+// upstream client, logger, metrics collector, tokenizer, store, and max body
+// size. A maxBodySize of 0 means unlimited. maxResponseSize limits upstream
+// response reads (0 means unlimited). streamTimeout sets a deadline on
+// streaming connections (0 means no timeout).
+func NewProxyHandler(
+	chain *pipeline.Chain,
+	client *UpstreamClient,
+	logger zerolog.Logger,
+	collector *metrics.Collector,
+	tok *tokenizer.Tokenizer,
+	st *store.Store,
+	maxBodySize int64,
+	maxResponseSize int64,
+	streamTimeout time.Duration,
+	cbRegistry *CircuitBreakerRegistry,
+	retryConfig RetryConfig,
+) *ProxyHandler {
 	return &ProxyHandler{
-		chain:     chain,
-		client:    client,
-		logger:    logger,
-		providers: make(map[string]ProviderConfig),
-		collector: collector,
-		tokenizer: tok,
-		store:     st,
-		streams:   NewStreamManager(),
+		chain:           chain,
+		client:          client,
+		logger:          logger,
+		providers:       make(map[string]ProviderConfig),
+		collector:       collector,
+		tokenizer:       tok,
+		store:           st,
+		streams:         NewStreamManager(),
+		maxBodySize:     maxBodySize,
+		maxResponseSize: maxResponseSize,
+		streamTimeout:   streamTimeout,
+		cbRegistry:      cbRegistry,
+		retryConfig:     retryConfig,
 	}
 }
 
@@ -88,6 +114,108 @@ func (h *ProxyHandler) resolveProvider(model string) (baseURL, apiKey string, fo
 	}
 
 	return "", "", pipeline.FormatUnknown, fmt.Errorf("no provider configured for model %q", model)
+}
+
+// forwardWithRetry attempts to forward the request using the retry/circuit-breaker
+// logic. It iterates through all configured providers, checking circuit breaker
+// state, and retries on transient failures with exponential backoff.
+func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.Request, logger zerolog.Logger) (*http.Response, error) {
+	// Build a list of candidate providers. Start with the exact match, then
+	// try all others as fallbacks.
+	type candidate struct {
+		name   string
+		config ProviderConfig
+	}
+	var candidates []candidate
+
+	// Try exact match first.
+	if p, ok := h.providers[pipeReq.Model]; ok {
+		candidates = append(candidates, candidate{name: pipeReq.Model, config: p})
+	}
+
+	// Add prefix matches and other providers as fallbacks.
+	for key, p := range h.providers {
+		if key == pipeReq.Model {
+			continue // already added
+		}
+		// Include prefix matches and all other providers as potential fallbacks.
+		if len(pipeReq.Model) > len(key) && pipeReq.Model[:len(key)] == key {
+			candidates = append(candidates, candidate{name: key, config: p})
+		}
+	}
+
+	// If no candidates found at all, try all providers.
+	if len(candidates) == 0 {
+		for key, p := range h.providers {
+			candidates = append(candidates, candidate{name: key, config: p})
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no provider configured for model %q", pipeReq.Model)
+	}
+
+	var lastErr error
+	for _, cand := range candidates {
+		cb := h.cbRegistry.Get(cand.name)
+		if !cb.Allow() {
+			logger.Debug().Str("provider", cand.name).Msg("circuit breaker open, skipping provider")
+			continue
+		}
+
+		for attempt := 0; attempt < h.retryConfig.MaxAttempts; attempt++ {
+			if attempt > 0 {
+				delay := backoffDelay(attempt-1, h.retryConfig.BaseDelay, h.retryConfig.MaxDelay)
+				if err := sleepWithContext(ctx, delay); err != nil {
+					return nil, err
+				}
+			}
+
+			resp, err := h.client.Forward(ctx, pipeReq, cand.config.BaseURL, cand.config.APIKey)
+			if err != nil {
+				lastErr = err
+				cb.RecordFailure()
+				logger.Warn().Err(err).Str("provider", cand.name).Int("attempt", attempt+1).Msg("upstream forward error, retrying")
+				continue
+			}
+
+			if isRetryableStatus(resp.StatusCode) {
+				// For streaming, don't retry after the connection is established
+				// since we can't replay the stream. Only retry connection-level failures.
+				if pipeReq.Stream {
+					cb.RecordFailure()
+					return resp, nil // return the error response; caller handles it
+				}
+
+				lastErr = fmt.Errorf("upstream returned status %d", resp.StatusCode)
+				cb.RecordFailure()
+
+				// Respect Retry-After header if present.
+				if ra := retryAfterDuration(resp); ra > 0 {
+					_ = resp.Body.Close()
+					if err := sleepWithContext(ctx, ra); err != nil {
+						return nil, err
+					}
+				} else {
+					_ = resp.Body.Close()
+				}
+
+				logger.Warn().Int("status", resp.StatusCode).Str("provider", cand.name).Int("attempt", attempt+1).Msg("retryable upstream status")
+				continue
+			}
+
+			// Non-retryable response (success or non-transient error).
+			cb.RecordSuccess()
+			return resp, nil
+		}
+
+		// Exhausted retries for this provider; try next.
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("all providers exhausted: %w", lastErr)
+	}
+	return nil, fmt.Errorf("all providers exhausted for model %q", pipeReq.Model)
 }
 
 // HandleRequest is the main proxy handler. It processes incoming API requests
@@ -127,8 +255,16 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Read and parse the request body.
+	if h.maxBodySize > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		logger.Error().Err(err).Msg("failed to read request body")
 		writeJSONError(w, http.StatusBadRequest, "failed to read request body")
 		return
@@ -148,7 +284,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to parse request")
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("failed to parse request: %v", err))
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -233,16 +369,19 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Step 5b: Rebuild RawBody from modified request fields.
 	pipeReq.RawBody = rebuildRequestBody(pipeReq)
 
-	// Step 6: Resolve the upstream provider for this model.
-	baseURL, apiKey, _, err := h.resolveProvider(pipeReq.Model)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to resolve provider")
-		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("no provider for model: %s", pipeReq.Model))
-		return
+	// Step 6 + 7: Resolve provider and forward with retry/fallback.
+	var upstreamResp *http.Response
+
+	if h.cbRegistry != nil && h.retryConfig.MaxAttempts > 0 {
+		upstreamResp, err = h.forwardWithRetry(ctx, pipeReq, logger)
+	} else {
+		var baseURL, apiKey string
+		baseURL, apiKey, _, err = h.resolveProvider(pipeReq.Model)
+		if err == nil {
+			upstreamResp, err = h.client.Forward(ctx, pipeReq, baseURL, apiKey)
+		}
 	}
 
-	// Step 7: Forward the request to the upstream provider.
-	upstreamResp, err := h.client.Forward(ctx, pipeReq, baseURL, apiKey)
 	if err != nil {
 		logger.Error().Err(err).Msg("upstream request failed")
 		writeJSONError(w, http.StatusBadGateway, "upstream request failed")
@@ -253,9 +392,81 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Set cache miss header for non-cached responses.
 	w.Header().Set("X-Tokenman-Cache", "MISS")
 
+	// Step 7b: If the upstream returned an error, propagate it directly.
+	if upstreamResp.StatusCode >= 400 {
+		logger.Warn().Int("upstream_status", upstreamResp.StatusCode).Msg("upstream returned error")
+
+		var errReader io.Reader = upstreamResp.Body
+		if h.maxResponseSize > 0 {
+			errReader = io.LimitReader(upstreamResp.Body, h.maxResponseSize+1)
+		}
+		errBody, readErr := io.ReadAll(errReader)
+		if readErr != nil {
+			logger.Error().Err(readErr).Msg("failed to read upstream error body")
+			writeJSONError(w, http.StatusBadGateway, "failed to read upstream error response")
+			return
+		}
+
+		// Copy Retry-After header for 429 responses.
+		if upstreamResp.StatusCode == http.StatusTooManyRequests {
+			if ra := upstreamResp.Header.Get("Retry-After"); ra != "" {
+				w.Header().Set("Retry-After", ra)
+			}
+		}
+
+		// Record metrics even for error responses.
+		if h.collector != nil {
+			errResp := &pipeline.Response{
+				RequestID:  requestID,
+				StatusCode: upstreamResp.StatusCode,
+				Latency:    time.Since(startTime),
+			}
+			h.collector.Record(pipeReq, errResp)
+		}
+
+		// Persist request record for upstream errors.
+		if h.store != nil {
+			h.store.InsertRequest(&store.Request{
+				ID:           requestID,
+				Timestamp:    startTime.UTC().Format(time.RFC3339),
+				Method:       r.Method,
+				Path:         r.URL.Path,
+				Format:       string(format),
+				Model:        pipeReq.Model,
+				TokensIn:     int64(pipeReq.TokensIn),
+				LatencyMs:    time.Since(startTime).Milliseconds(),
+				StatusCode:   upstreamResp.StatusCode,
+				RequestType:  "upstream_error",
+				RequestBody:  bodyForStore(body),
+				ResponseBody: bodyForStore(errBody),
+				Project:      project,
+			})
+		}
+
+		// Forward upstream response headers and body.
+		for _, key := range []string{"Content-Type", "X-Request-Id", "Request-Id"} {
+			if val := upstreamResp.Header.Get(key); val != "" {
+				w.Header().Set(key, val)
+			}
+		}
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		w.WriteHeader(upstreamResp.StatusCode)
+		_, _ = w.Write(errBody)
+		return
+	}
+
 	// Step 8: Handle the response based on streaming vs non-streaming.
 	if pipeReq.Stream {
-		pipeResp, err := HandleStreaming(ctx, w, upstreamResp, format)
+		// Apply stream timeout if configured.
+		if h.streamTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, h.streamTimeout)
+			defer cancel()
+		}
+
+		pipeResp, err := HandleStreaming(ctx, w, upstreamResp, format, h.maxResponseSize)
 		if err != nil {
 			logger.Error().Err(err).Msg("streaming error")
 			// Response headers and partial data may already be written.
@@ -307,10 +518,19 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Non-streaming response.
-	respBody, err := io.ReadAll(upstreamResp.Body)
+	var respReader io.Reader = upstreamResp.Body
+	if h.maxResponseSize > 0 {
+		respReader = io.LimitReader(upstreamResp.Body, h.maxResponseSize+1)
+	}
+	respBody, err := io.ReadAll(respReader)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to read upstream response")
 		writeJSONError(w, http.StatusBadGateway, "failed to read upstream response")
+		return
+	}
+	if h.maxResponseSize > 0 && int64(len(respBody)) > h.maxResponseSize {
+		logger.Warn().Int64("max_response_size", h.maxResponseSize).Msg("upstream response too large")
+		writeJSONError(w, http.StatusBadGateway, "upstream response too large")
 		return
 	}
 
@@ -428,7 +648,7 @@ func (h *ProxyHandler) HandleModels(w http.ResponseWriter, r *http.Request) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to create models request")
-		writeJSONError(w, http.StatusInternalServerError, "failed to create models request")
+		writeJSONError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -450,10 +670,19 @@ func (h *ProxyHandler) HandleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	var modelsReader io.Reader = resp.Body
+	if h.maxResponseSize > 0 {
+		modelsReader = io.LimitReader(resp.Body, h.maxResponseSize+1)
+	}
+	respBody, err := io.ReadAll(modelsReader)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to read upstream models response")
 		writeJSONError(w, http.StatusBadGateway, "failed to read upstream models response")
+		return
+	}
+	if h.maxResponseSize > 0 && int64(len(respBody)) > h.maxResponseSize {
+		logger.Warn().Int64("max_response_size", h.maxResponseSize).Msg("upstream models response too large")
+		writeJSONError(w, http.StatusBadGateway, "upstream response too large")
 		return
 	}
 

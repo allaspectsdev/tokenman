@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -531,6 +532,61 @@ func TestEmptyChain(t *testing.T) {
 	}
 	if outResp != resp {
 		t.Error("expected same response object to pass through")
+	}
+}
+
+// TestProcessRequest_PanicRecovery verifies that a panicking middleware in the
+// request phase is recovered and converted into an error rather than crashing.
+func TestProcessRequest_PanicRecovery(t *testing.T) {
+	panicMW := &mockMiddleware{
+		name:    "panicker",
+		enabled: true,
+		onReq: func(_ context.Context, req *Request) (*Request, error) {
+			panic("request boom")
+		},
+	}
+
+	chain := NewChain(panicMW)
+	ctx := context.Background()
+	req := newRequest()
+
+	_, _, err := chain.ProcessRequest(ctx, req)
+	if err == nil {
+		t.Fatal("expected error from panicking middleware")
+	}
+	if !strings.Contains(err.Error(), "panic") {
+		t.Errorf("error should mention panic: got %v", err)
+	}
+	if !strings.Contains(err.Error(), "request boom") {
+		t.Errorf("error should contain panic value: got %v", err)
+	}
+}
+
+// TestProcessResponse_PanicRecovery verifies that a panicking middleware in the
+// response phase is recovered and converted into an error rather than crashing.
+func TestProcessResponse_PanicRecovery(t *testing.T) {
+	panicMW := &mockMiddleware{
+		name:    "panicker",
+		enabled: true,
+		onResp: func(_ context.Context, _ *Request, resp *Response) (*Response, error) {
+			panic("response boom")
+		},
+	}
+
+	chain := NewChain(panicMW)
+	ctx := context.Background()
+	req := newRequest()
+	resp := newResponse()
+
+	_, err := chain.ProcessResponse(ctx, req, resp)
+	if err == nil {
+		t.Fatal("expected error from panicking middleware")
+	}
+	if !strings.Contains(err.Error(), "panic") {
+		t.Errorf("error should mention panic: got %v", err)
+	}
+	if !strings.Contains(err.Error(), "response boom") {
+		t.Errorf("error should contain panic value: got %v", err)
 	}
 }
 

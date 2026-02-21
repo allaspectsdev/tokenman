@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,9 +19,10 @@ type Server struct {
 	httpSrv *http.Server
 }
 
-// NewServer creates a new Server with the given ProxyHandler and listen address.
-// It mounts all API routes onto a chi router.
-func NewServer(handler *ProxyHandler, addr string) *Server {
+// NewServer creates a new Server with the given ProxyHandler, listen address,
+// and HTTP timeout durations. Zero-value timeouts leave the corresponding
+// http.Server field at its default (no timeout).
+func NewServer(handler *ProxyHandler, addr string, readTimeout, writeTimeout, idleTimeout time.Duration) *Server {
 	r := chi.NewRouter()
 
 	// Standard chi middleware.
@@ -45,8 +48,11 @@ func NewServer(handler *ProxyHandler, addr string) *Server {
 	}
 
 	srv.httpSrv = &http.Server{
-		Addr:    addr,
-		Handler: r,
+		Addr:         addr,
+		Handler:      r,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
 
 	return srv
@@ -62,6 +68,15 @@ func (s *Server) Router() chi.Router {
 // It blocks until the server is shut down or encounters a fatal error.
 func (s *Server) Start() error {
 	return s.httpSrv.ListenAndServe()
+}
+
+// StartTLS begins listening for HTTPS connections using the given certificate
+// and key files. It blocks until the server is shut down or encounters a fatal error.
+func (s *Server) StartTLS(certFile, keyFile string) error {
+	if err := s.httpSrv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("proxy server (TLS): %w", err)
+	}
+	return nil
 }
 
 // Shutdown gracefully stops the server, waiting for in-flight requests to

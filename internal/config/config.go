@@ -43,6 +43,7 @@ type Config struct {
 	Routing     RoutingConfig             `mapstructure:"routing"     toml:"routing"`
 	Compression CompressionConfig         `mapstructure:"compression" toml:"compression"`
 	Security    SecurityConfig            `mapstructure:"security"    toml:"security"`
+	Resilience  ResilienceConfig          `mapstructure:"resilience"  toml:"resilience"`
 	Dashboard   DashboardConfig           `mapstructure:"dashboard"   toml:"dashboard"`
 	Metrics     MetricsConfig             `mapstructure:"metrics"     toml:"metrics"`
 	Plugins     PluginConfig              `mapstructure:"plugins"     toml:"plugins"`
@@ -50,10 +51,19 @@ type Config struct {
 
 // ServerConfig holds the core server settings.
 type ServerConfig struct {
-	ProxyPort     int    `mapstructure:"proxy_port"     toml:"proxy_port"`
-	DashboardPort int    `mapstructure:"dashboard_port" toml:"dashboard_port"`
-	LogLevel      string `mapstructure:"log_level"       toml:"log_level"`
-	DataDir       string `mapstructure:"data_dir"        toml:"data_dir"`
+	ProxyPort       int    `mapstructure:"proxy_port"        toml:"proxy_port"`
+	DashboardPort   int    `mapstructure:"dashboard_port"    toml:"dashboard_port"`
+	LogLevel        string `mapstructure:"log_level"          toml:"log_level"`
+	DataDir         string `mapstructure:"data_dir"           toml:"data_dir"`
+	TLSEnabled      bool   `mapstructure:"tls_enabled"       toml:"tls_enabled"`
+	CertFile        string `mapstructure:"cert_file"          toml:"cert_file"`
+	KeyFile         string `mapstructure:"key_file"           toml:"key_file"`
+	ReadTimeout     int    `mapstructure:"read_timeout"      toml:"read_timeout"`
+	WriteTimeout    int    `mapstructure:"write_timeout"     toml:"write_timeout"`
+	IdleTimeout     int    `mapstructure:"idle_timeout"      toml:"idle_timeout"`
+	MaxBodySize     int64  `mapstructure:"max_body_size"     toml:"max_body_size"`
+	MaxResponseSize int64  `mapstructure:"max_response_size" toml:"max_response_size"`
+	StreamTimeout   int    `mapstructure:"stream_timeout"    toml:"stream_timeout"`
 }
 
 // AuthConfig holds the dashboard authentication settings.
@@ -187,14 +197,26 @@ type BudgetConfig struct {
 
 // DashboardConfig controls the web dashboard.
 type DashboardConfig struct {
-	Enabled  bool `mapstructure:"enabled"   toml:"enabled"`
-	AutoOpen bool `mapstructure:"auto_open" toml:"auto_open"`
+	Enabled        bool     `mapstructure:"enabled"         toml:"enabled"`
+	AutoOpen       bool     `mapstructure:"auto_open"       toml:"auto_open"`
+	AllowedOrigins []string `mapstructure:"allowed_origins" toml:"allowed_origins"`
 }
 
 // MetricsConfig controls metrics storage and caching.
 type MetricsConfig struct {
 	RetentionDays   int `mapstructure:"retention_days"    toml:"retention_days"`
 	CacheTTLSeconds int `mapstructure:"cache_ttl_seconds" toml:"cache_ttl_seconds"`
+}
+
+// ResilienceConfig controls retry, circuit breaker, and related resilience settings.
+type ResilienceConfig struct {
+	RetryMaxAttempts   int  `mapstructure:"retry_max_attempts"       toml:"retry_max_attempts"`
+	RetryBaseDelayMs   int  `mapstructure:"retry_base_delay_ms"      toml:"retry_base_delay_ms"`
+	RetryMaxDelayMs    int  `mapstructure:"retry_max_delay_ms"       toml:"retry_max_delay_ms"`
+	CBEnabled          bool `mapstructure:"circuit_breaker_enabled"  toml:"circuit_breaker_enabled"`
+	CBFailureThreshold int  `mapstructure:"cb_failure_threshold"     toml:"cb_failure_threshold"`
+	CBResetTimeoutSec  int  `mapstructure:"cb_reset_timeout_seconds" toml:"cb_reset_timeout_seconds"`
+	CBHalfOpenMax      int  `mapstructure:"cb_half_open_max_calls"   toml:"cb_half_open_max_calls"`
 }
 
 // Load reads configuration from disk with the following precedence:
@@ -345,6 +367,14 @@ func setViperDefaults(v *viper.Viper) {
 	v.SetDefault("server.log_level", d.Server.LogLevel)
 	v.SetDefault("server.data_dir", d.Server.DataDir)
 
+	v.SetDefault("server.tls_enabled", d.Server.TLSEnabled)
+	v.SetDefault("server.cert_file", d.Server.CertFile)
+	v.SetDefault("server.key_file", d.Server.KeyFile)
+	v.SetDefault("server.read_timeout", d.Server.ReadTimeout)
+	v.SetDefault("server.write_timeout", d.Server.WriteTimeout)
+	v.SetDefault("server.idle_timeout", d.Server.IdleTimeout)
+	v.SetDefault("server.max_body_size", d.Server.MaxBodySize)
+
 	// Auth
 	v.SetDefault("auth.enabled", d.Auth.Enabled)
 	v.SetDefault("auth.token", d.Auth.Token)
@@ -404,10 +434,24 @@ func setViperDefaults(v *viper.Viper) {
 	// Dashboard
 	v.SetDefault("dashboard.enabled", d.Dashboard.Enabled)
 	v.SetDefault("dashboard.auto_open", d.Dashboard.AutoOpen)
+	v.SetDefault("dashboard.allowed_origins", d.Dashboard.AllowedOrigins)
 
 	// Metrics
 	v.SetDefault("metrics.retention_days", d.Metrics.RetentionDays)
 	v.SetDefault("metrics.cache_ttl_seconds", d.Metrics.CacheTTLSeconds)
+
+	// Resilience
+	v.SetDefault("resilience.retry_max_attempts", d.Resilience.RetryMaxAttempts)
+	v.SetDefault("resilience.retry_base_delay_ms", d.Resilience.RetryBaseDelayMs)
+	v.SetDefault("resilience.retry_max_delay_ms", d.Resilience.RetryMaxDelayMs)
+	v.SetDefault("resilience.circuit_breaker_enabled", d.Resilience.CBEnabled)
+	v.SetDefault("resilience.cb_failure_threshold", d.Resilience.CBFailureThreshold)
+	v.SetDefault("resilience.cb_reset_timeout_seconds", d.Resilience.CBResetTimeoutSec)
+	v.SetDefault("resilience.cb_half_open_max_calls", d.Resilience.CBHalfOpenMax)
+
+	// Server (new resilience-related fields)
+	v.SetDefault("server.max_response_size", d.Server.MaxResponseSize)
+	v.SetDefault("server.stream_timeout", d.Server.StreamTimeout)
 
 	// Plugins
 	v.SetDefault("plugins.enabled", d.Plugins.Enabled)

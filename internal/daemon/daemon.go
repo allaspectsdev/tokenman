@@ -94,7 +94,11 @@ func Run(cfg *config.Config, foreground bool) error {
 	if err := WritePID(dataDir); err != nil {
 		return fmt.Errorf("writing PID file: %w", err)
 	}
-	defer RemovePID(dataDir)
+	defer func() {
+		if err := RemovePID(dataDir); err != nil {
+			log.Error().Err(err).Msg("failed to remove PID file")
+		}
+	}()
 
 	log.Info().Int("pid", os.Getpid()).Msg("PID file written")
 
@@ -124,7 +128,11 @@ func Run(cfg *config.Config, foreground bool) error {
 	// 7. Start periodic data pruning.
 	pruneCtx, pruneCancel := context.WithCancel(context.Background())
 	defer pruneCancel()
-	go runPruner(pruneCtx, st, cfg.Metrics.RetentionDays)
+	prunerDone := make(chan struct{})
+	go func() {
+		defer close(prunerDone)
+		runPruner(pruneCtx, st, cfg.Metrics.RetentionDays)
+	}()
 
 	// ---------------------------------------------------------------
 	// 8. Wire up the V2 proxy stack.
@@ -230,22 +238,58 @@ func Run(cfg *config.Config, foreground bool) error {
 	// 8e. Create proxy server.
 	upstreamClient := proxy.NewUpstreamClient()
 	tok := tokenizer.New()
-	proxyHandler := proxy.NewProxyHandler(chain, upstreamClient, log.Logger, collector, tok, st)
+
+	// Build retry config and circuit breaker registry from resilience settings.
+	retryConfig := proxy.RetryConfig{
+		MaxAttempts: cfg.Resilience.RetryMaxAttempts,
+		BaseDelay:   time.Duration(cfg.Resilience.RetryBaseDelayMs) * time.Millisecond,
+		MaxDelay:    time.Duration(cfg.Resilience.RetryMaxDelayMs) * time.Millisecond,
+	}
+
+	var cbRegistry *proxy.CircuitBreakerRegistry
+	if cfg.Resilience.CBEnabled {
+		cbRegistry = proxy.NewCircuitBreakerRegistry(
+			cfg.Resilience.CBFailureThreshold,
+			time.Duration(cfg.Resilience.CBResetTimeoutSec)*time.Second,
+			cfg.Resilience.CBHalfOpenMax,
+		)
+	}
+
+	streamTimeout := time.Duration(cfg.Server.StreamTimeout) * time.Second
+
+	proxyHandler := proxy.NewProxyHandler(
+		chain, upstreamClient, log.Logger, collector, tok, st,
+		cfg.Server.MaxBodySize,
+		cfg.Server.MaxResponseSize,
+		streamTimeout,
+		cbRegistry,
+		retryConfig,
+	)
 	proxyHandler.SetProviders(providerMap)
 
 	proxyAddr := fmt.Sprintf(":%d", cfg.Server.ProxyPort)
-	proxyServer := proxy.NewServer(proxyHandler, proxyAddr)
+	readTimeout := time.Duration(cfg.Server.ReadTimeout) * time.Second
+	writeTimeout := time.Duration(cfg.Server.WriteTimeout) * time.Second
+	idleTimeout := time.Duration(cfg.Server.IdleTimeout) * time.Second
+	proxyServer := proxy.NewServer(proxyHandler, proxyAddr, readTimeout, writeTimeout, idleTimeout)
 
 	// Start cache purger (reuses the pruneCtx).
-	cacheMW.StartPurger(pruneCtx)
+	purgerDone := cacheMW.StartPurger(pruneCtx)
 
 	// Channel to collect server startup errors.
 	errCh := make(chan error, 2)
 
 	go func() {
-		log.Info().Str("addr", proxyAddr).Msg("proxy server starting")
-		if err := proxyServer.Start(); err != nil && err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("proxy server: %w", err)
+		if cfg.Server.TLSEnabled {
+			log.Info().Str("addr", proxyAddr).Msg("proxy server starting (TLS)")
+			if err := proxyServer.StartTLS(cfg.Server.CertFile, cfg.Server.KeyFile); err != nil {
+				errCh <- fmt.Errorf("proxy server: %w", err)
+			}
+		} else {
+			log.Info().Str("addr", proxyAddr).Msg("proxy server starting")
+			if err := proxyServer.Start(); err != nil && err != http.ErrServerClosed {
+				errCh <- fmt.Errorf("proxy server: %w", err)
+			}
 		}
 	}()
 
@@ -256,29 +300,47 @@ func Run(cfg *config.Config, foreground bool) error {
 		dashServer = metrics.NewDashboardServer(collector, st, cfg, dashAddr)
 
 		go func() {
-			if err := dashServer.Start(); err != nil {
-				errCh <- fmt.Errorf("dashboard server: %w", err)
+			if cfg.Server.TLSEnabled {
+				if err := dashServer.StartTLS(cfg.Server.CertFile, cfg.Server.KeyFile); err != nil {
+					errCh <- fmt.Errorf("dashboard server: %w", err)
+				}
+			} else {
+				if err := dashServer.Start(); err != nil {
+					errCh <- fmt.Errorf("dashboard server: %w", err)
+				}
 			}
 		}()
+
+		scheme := "http"
+		if cfg.Server.TLSEnabled {
+			scheme = "https"
+		}
 
 		log.Info().
 			Int("proxy_port", cfg.Server.ProxyPort).
 			Int("dashboard_port", cfg.Server.DashboardPort).
+			Bool("tls", cfg.Server.TLSEnabled).
 			Msg("tokenman is ready")
 
 		if foreground {
 			fmt.Printf("\n  TokenMan is running!\n")
-			fmt.Printf("  Proxy:     http://localhost:%d\n", cfg.Server.ProxyPort)
-			fmt.Printf("  Dashboard: http://localhost:%d\n\n", cfg.Server.DashboardPort)
+			fmt.Printf("  Proxy:     %s://localhost:%d\n", scheme, cfg.Server.ProxyPort)
+			fmt.Printf("  Dashboard: %s://localhost:%d\n\n", scheme, cfg.Server.DashboardPort)
 		}
 	} else {
+		scheme := "http"
+		if cfg.Server.TLSEnabled {
+			scheme = "https"
+		}
+
 		log.Info().
 			Int("proxy_port", cfg.Server.ProxyPort).
+			Bool("tls", cfg.Server.TLSEnabled).
 			Msg("tokenman is ready (dashboard disabled)")
 
 		if foreground {
 			fmt.Printf("\n  TokenMan is running!\n")
-			fmt.Printf("  Proxy: http://localhost:%d\n\n", cfg.Server.ProxyPort)
+			fmt.Printf("  Proxy: %s://localhost:%d\n\n", scheme, cfg.Server.ProxyPort)
 		}
 	}
 
@@ -310,10 +372,14 @@ func Run(cfg *config.Config, foreground bool) error {
 		log.Error().Err(err).Msg("proxy server shutdown error")
 	}
 
-	// 12. Clean up.
+	// 12. Clean up — wait for background goroutines before closing the store.
 	pruneCancel()
+	<-purgerDone
+	<-prunerDone
 	st.Close()
-	RemovePID(dataDir)
+	if err := RemovePID(dataDir); err != nil {
+		log.Error().Err(err).Msg("failed to remove PID file during shutdown")
+	}
 
 	log.Info().Msg("tokenman stopped")
 	return nil
@@ -330,7 +396,9 @@ func Stop() error {
 
 	if !isProcessAlive(pid) {
 		// Stale PID file; clean it up.
-		RemovePID(dataDir)
+		if rmErr := RemovePID(dataDir); rmErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to remove stale PID file: %v\n", rmErr)
+		}
 		return fmt.Errorf("tokenman is not running (stale PID file removed)")
 	}
 
@@ -417,12 +485,19 @@ func runPruner(ctx context.Context, st *store.Store, retentionDays int) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n, err := st.Prune(retentionDays)
-			if err != nil {
-				log.Error().Err(err).Msg("data pruning failed")
-			} else if n > 0 {
-				log.Info().Int64("rows", n).Int("retention_days", retentionDays).Msg("pruned old data")
-			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error().Interface("panic", r).Msg("data pruner: recovered from panic")
+					}
+				}()
+				n, err := st.Prune(retentionDays)
+				if err != nil {
+					log.Error().Err(err).Msg("data pruning failed")
+				} else if n > 0 {
+					log.Info().Int64("rows", n).Int("retention_days", retentionDays).Msg("pruned old data")
+				}
+			}()
 		}
 	}
 }

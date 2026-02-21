@@ -6,6 +6,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/rs/zerolog/log"
 
 	"github.com/allaspects/tokenman/internal/pipeline"
 )
@@ -201,19 +202,31 @@ func (c *CacheMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Req
 // StartPurger starts a background goroutine that periodically purges expired
 // entries from the persistent store and evicts expired entries from the
 // in-memory LRU. It runs every 5 minutes until the context is cancelled.
-func (c *CacheMiddleware) StartPurger(ctx context.Context) {
+// The returned channel is closed when the goroutine exits, allowing callers
+// to synchronize shutdown before closing the underlying store.
+func (c *CacheMiddleware) StartPurger(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
+		defer close(done)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				c.purge()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Error().Interface("panic", r).Msg("cache purger: recovered from panic")
+						}
+					}()
+					c.purge()
+				}()
 			}
 		}
 	}()
+	return done
 }
 
 // purge removes expired entries from both the persistent store and the

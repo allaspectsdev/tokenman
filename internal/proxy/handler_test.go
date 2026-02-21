@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allaspects/tokenman/internal/metrics"
 	"github.com/allaspects/tokenman/internal/pipeline"
@@ -72,7 +73,7 @@ func (m *budgetExceededMiddleware) ProcessResponse(ctx context.Context, req *pip
 func newTestHandler(chain *pipeline.Chain, upstreamURL string) *ProxyHandler {
 	collector := metrics.NewCollector()
 	tok := tokenizer.New()
-	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil)
+	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, nil, RetryConfig{})
 
 	if upstreamURL != "" {
 		handler.SetProviders(map[string]ProviderConfig{
@@ -90,7 +91,7 @@ func newTestHandler(chain *pipeline.Chain, upstreamURL string) *ProxyHandler {
 // newTestServer creates a chi-based Server with the given handler and returns
 // a httptest.Server ready for requests.
 func newTestServer(handler *ProxyHandler) *httptest.Server {
-	srv := NewServer(handler, ":0")
+	srv := NewServer(handler, ":0", 0, 0, 0)
 	return httptest.NewServer(srv.Router())
 }
 
@@ -280,6 +281,138 @@ func TestBudgetExceeded_Returns429(t *testing.T) {
 	}
 	if errorObj["period"] != "daily" {
 		t.Errorf("error.period = %v; want %q", errorObj["period"], "daily")
+	}
+}
+
+func TestUpstreamError_PropagatesStatusCode(t *testing.T) {
+	upstream := mockUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`))
+	})
+	defer upstream.Close()
+
+	chain := pipeline.NewChain()
+	handler := newTestHandler(chain, upstream.URL)
+	ts := newTestServer(handler)
+	defer ts.Close()
+
+	reqBody := `{"model":"test-model","messages":[{"role":"user","content":"hello"}],"max_tokens":100}`
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/messages failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, http.StatusTooManyRequests, string(body))
+	}
+
+	// Verify Retry-After header is forwarded.
+	if ra := resp.Header.Get("Retry-After"); ra != "30" {
+		t.Errorf("Retry-After = %q; want %q", ra, "30")
+	}
+}
+
+func TestRetry_SucceedsOnSecondAttempt(t *testing.T) {
+	attempt := 0
+	upstream := mockUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		attempt++
+		if attempt == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"msg_retry","type":"message","role":"assistant","content":[{"type":"text","text":"retried!"}],"model":"test-model","stop_reason":"end_turn"}`))
+	})
+	defer upstream.Close()
+
+	chain := pipeline.NewChain()
+	collector := metrics.NewCollector()
+	tok := tokenizer.New()
+
+	cbRegistry := NewCircuitBreakerRegistry(5, 60*time.Second, 1)
+	retryConfig := RetryConfig{
+		MaxAttempts: 3,
+		BaseDelay:   1 * time.Millisecond,
+		MaxDelay:    10 * time.Millisecond,
+	}
+
+	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig)
+	handler.SetProviders(map[string]ProviderConfig{
+		"test-model": {
+			BaseURL: upstream.URL,
+			APIKey:  "test-key",
+			Format:  pipeline.FormatAnthropic,
+		},
+	})
+
+	ts := newTestServer(handler)
+	defer ts.Close()
+
+	reqBody := `{"model":"test-model","messages":[{"role":"user","content":"hello"}],"max_tokens":100}`
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/messages failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, http.StatusOK, string(body))
+	}
+
+	if attempt != 2 {
+		t.Errorf("expected 2 upstream attempts, got %d", attempt)
+	}
+}
+
+func TestRetry_Exhausted_Returns502(t *testing.T) {
+	upstream := mockUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"unavailable"}`))
+	})
+	defer upstream.Close()
+
+	chain := pipeline.NewChain()
+	collector := metrics.NewCollector()
+	tok := tokenizer.New()
+
+	cbRegistry := NewCircuitBreakerRegistry(10, 60*time.Second, 1) // high threshold so it doesn't trip
+	retryConfig := RetryConfig{
+		MaxAttempts: 2,
+		BaseDelay:   1 * time.Millisecond,
+		MaxDelay:    10 * time.Millisecond,
+	}
+
+	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig)
+	handler.SetProviders(map[string]ProviderConfig{
+		"test-model": {
+			BaseURL: upstream.URL,
+			APIKey:  "test-key",
+			Format:  pipeline.FormatAnthropic,
+		},
+	})
+
+	ts := newTestServer(handler)
+	defer ts.Close()
+
+	reqBody := `{"model":"test-model","messages":[{"role":"user","content":"hello"}],"max_tokens":100}`
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/messages failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, http.StatusBadGateway, string(body))
 	}
 }
 

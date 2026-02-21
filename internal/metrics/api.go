@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,23 +44,10 @@ func NewDashboardServer(collector *Collector, st *store.Store, cfg *config.Confi
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
-	r.Use(corsMiddleware)
+	r.Use(makeCORSMiddleware(cfg.Dashboard.AllowedOrigins))
 
-	// API routes.
-	r.Get("/api/stats", d.handleStats)
-	r.Get("/api/stats/history", d.handleStatsHistory)
-	r.Get("/api/requests", d.handleListRequests)
-	r.Get("/api/requests/{id}", d.handleGetRequest)
-	r.Get("/api/config", d.handleGetConfig)
-	r.Post("/api/config", d.handleUpdateConfig)
-	r.Get("/api/providers", d.handleProviders)
-	r.Get("/api/security/pii", d.handlePIILog)
-	r.Get("/api/security/budget", d.handleBudget)
+	// Public routes — always accessible (health checks, monitoring, static assets).
 	r.Get("/api/health", d.handleHealth)
-	r.Get("/api/projects", d.handleProjects)
-	r.Get("/api/plugins", d.handlePlugins)
-
-	// Prometheus metrics endpoint.
 	r.Get("/metrics", PrometheusHandler(collector))
 
 	// Static file serving from embedded filesystem.
@@ -69,6 +57,28 @@ func NewDashboardServer(collector *Collector, st *store.Store, cfg *config.Confi
 	// Dashboard HTML (catch-all).
 	r.Get("/", d.handleDashboard)
 	r.Get("/*", d.handleDashboard)
+
+	// Protected API routes — conditionally require auth.
+	r.Group(func(r chi.Router) {
+		if cfg.Auth.Enabled && cfg.Auth.Token != "" {
+			r.Use(authMiddleware(cfg.Auth.Token))
+			log.Info().Msg("dashboard API authentication enabled")
+		} else {
+			log.Warn().Msg("dashboard API authentication is disabled; set [auth] enabled=true with a token for production use")
+		}
+
+		r.Get("/api/stats", d.handleStats)
+		r.Get("/api/stats/history", d.handleStatsHistory)
+		r.Get("/api/requests", d.handleListRequests)
+		r.Get("/api/requests/{id}", d.handleGetRequest)
+		r.Get("/api/config", d.handleGetConfig)
+		r.Post("/api/config", d.handleUpdateConfig)
+		r.Get("/api/providers", d.handleProviders)
+		r.Get("/api/security/pii", d.handlePIILog)
+		r.Get("/api/security/budget", d.handleBudget)
+		r.Get("/api/projects", d.handleProjects)
+		r.Get("/api/plugins", d.handlePlugins)
+	})
 
 	d.router = r
 	return d
@@ -88,6 +98,24 @@ func (d *DashboardServer) Start() error {
 	log.Info().Str("addr", d.addr).Msg("dashboard server starting")
 	if err := d.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("dashboard server: %w", err)
+	}
+	return nil
+}
+
+// StartTLS begins listening with TLS on the configured address. It blocks
+// until the server is shut down or an error occurs.
+func (d *DashboardServer) StartTLS(certFile, keyFile string) error {
+	d.server = &http.Server{
+		Addr:         d.addr,
+		Handler:      d.router,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	log.Info().Str("addr", d.addr).Msg("dashboard server starting (TLS)")
+	if err := d.server.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("dashboard server (TLS): %w", err)
 	}
 	return nil
 }
@@ -602,16 +630,85 @@ func redactKeys(m map[string]interface{}) {
 	}
 }
 
-// corsMiddleware adds permissive CORS headers for local development.
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
+// makeCORSMiddleware returns a CORS middleware configured with the given
+// allowed origins. When the list contains "*", all origins are permitted
+// (backward compatible with existing behavior). Otherwise, the Origin
+// header is validated against the allowed list.
+func makeCORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowAll := false
+	originSet := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o == "*" {
+			allowAll = true
 		}
-		next.ServeHTTP(w, r)
-	})
+		originSet[o] = struct{}{}
+	}
+
+	if allowAll {
+		log.Warn().Msg("CORS is configured to allow all origins; restrict dashboard.allowed_origins for production use")
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+
+			if allowAll {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else if origin != "" {
+				if _, ok := originSet[origin]; ok {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
+				} else {
+					// Unknown origin on preflight → reject.
+					if r.Method == http.MethodOptions {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					// Non-preflight from unknown origin: proceed without CORS headers.
+					// The browser will block the response on the client side.
+				}
+			}
+
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// authMiddleware returns a middleware that validates a Bearer token using
+// constant-time comparison. Returns 401 for missing tokens and 403 for
+// invalid tokens.
+func authMiddleware(token string) func(http.Handler) http.Handler {
+	tokenBytes := []byte(token)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+				return
+			}
+
+			// Expect "Bearer <token>".
+			const prefix = "Bearer "
+			if !strings.HasPrefix(authHeader, prefix) {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+				return
+			}
+
+			provided := []byte(strings.TrimPrefix(authHeader, prefix))
+			if subtle.ConstantTimeCompare(provided, tokenBytes) != 1 {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid token"})
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }

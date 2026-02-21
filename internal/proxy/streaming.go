@@ -13,7 +13,9 @@ import (
 // HandleStreaming processes a streaming upstream response by forwarding SSE events
 // to the client while accumulating content deltas for token counting.
 // It returns a pipeline.Response with the accumulated content in the Body field.
-func HandleStreaming(ctx context.Context, w http.ResponseWriter, upstreamResp *http.Response, format pipeline.APIFormat) (*pipeline.Response, error) {
+// maxAccumulatorSize caps the internal accumulator; when exceeded, events are
+// still forwarded to the client but accumulation stops (0 means unlimited).
+func HandleStreaming(ctx context.Context, w http.ResponseWriter, upstreamResp *http.Response, format pipeline.APIFormat, maxAccumulatorSize int64) (*pipeline.Response, error) {
 	// Set SSE response headers.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -26,6 +28,7 @@ func HandleStreaming(ctx context.Context, w http.ResponseWriter, upstreamResp *h
 
 	var contentAccumulator strings.Builder
 	var model string
+	accumulatorCapped := false
 
 	for {
 		// Check for client disconnect.
@@ -51,8 +54,11 @@ func HandleStreaming(ctx context.Context, w http.ResponseWriter, upstreamResp *h
 		// Extract content deltas for accumulation based on the API format.
 		if evt.Data != "" && evt.Data != "[DONE]" {
 			delta, m := extractDelta(evt.Data, format)
-			if delta != "" {
+			if delta != "" && !accumulatorCapped {
 				contentAccumulator.WriteString(delta)
+				if maxAccumulatorSize > 0 && int64(contentAccumulator.Len()) > maxAccumulatorSize {
+					accumulatorCapped = true
+				}
 			}
 			if m != "" {
 				model = m

@@ -7,6 +7,18 @@ import (
 	"time"
 )
 
+// recoverMiddleware runs fn inside a deferred recover so that a panicking
+// middleware does not crash the entire process. If a panic is caught it is
+// converted into an error that includes the middleware name.
+func recoverMiddleware(name string, fn func() error) (retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("middleware %s: panic: %v", name, r)
+		}
+	}()
+	return fn()
+}
+
 // Chain executes an ordered sequence of Middleware.
 // Requests flow through middlewares in order; responses flow in reverse order.
 type Chain struct {
@@ -49,8 +61,12 @@ func (c *Chain) ProcessRequest(ctx context.Context, req *Request) (*Request, *Ca
 		name := mw.Name()
 		start := time.Now()
 
-		var err error
-		req, err = mw.ProcessRequest(ctx, req)
+		var innerReq *Request
+		err := recoverMiddleware(name, func() error {
+			var mwErr error
+			innerReq, mwErr = mw.ProcessRequest(ctx, req)
+			return mwErr
+		})
 		elapsed := time.Since(start)
 
 		// Record timing regardless of success or failure.
@@ -61,6 +77,7 @@ func (c *Chain) ProcessRequest(ctx context.Context, req *Request) (*Request, *Ca
 			return nil, nil, fmt.Errorf("middleware %s: request processing failed: %w", name, err)
 		}
 
+		req = innerReq
 		if req == nil {
 			return nil, nil, fmt.Errorf("middleware %s: returned nil request without error", name)
 		}
@@ -101,8 +118,12 @@ func (c *Chain) ProcessResponse(ctx context.Context, req *Request, resp *Respons
 		name := mw.Name()
 		start := time.Now()
 
-		var err error
-		resp, err = mw.ProcessResponse(ctx, req, resp)
+		var innerResp *Response
+		err := recoverMiddleware(name, func() error {
+			var mwErr error
+			innerResp, mwErr = mw.ProcessResponse(ctx, req, resp)
+			return mwErr
+		})
 		elapsed := time.Since(start)
 
 		// Accumulate response-phase timing onto any existing request-phase timing.
@@ -113,6 +134,7 @@ func (c *Chain) ProcessResponse(ctx context.Context, req *Request, resp *Respons
 			return nil, fmt.Errorf("middleware %s: response processing failed: %w", name, err)
 		}
 
+		resp = innerResp
 		if resp == nil {
 			return nil, fmt.Errorf("middleware %s: returned nil response without error", name)
 		}

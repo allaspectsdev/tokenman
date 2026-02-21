@@ -26,6 +26,32 @@ func validate(cfg *Config) error {
 	if cfg.Server.DataDir == "" {
 		errs = append(errs, "server.data_dir must not be empty")
 	}
+	if cfg.Server.TLSEnabled {
+		if cfg.Server.CertFile == "" {
+			errs = append(errs, "server.cert_file must be set when tls_enabled is true")
+		}
+		if cfg.Server.KeyFile == "" {
+			errs = append(errs, "server.key_file must be set when tls_enabled is true")
+		}
+	}
+	if cfg.Server.ReadTimeout < 0 {
+		errs = append(errs, fmt.Sprintf("server.read_timeout must be non-negative, got %d", cfg.Server.ReadTimeout))
+	}
+	if cfg.Server.WriteTimeout < 0 {
+		errs = append(errs, fmt.Sprintf("server.write_timeout must be non-negative, got %d", cfg.Server.WriteTimeout))
+	}
+	if cfg.Server.IdleTimeout < 0 {
+		errs = append(errs, fmt.Sprintf("server.idle_timeout must be non-negative, got %d", cfg.Server.IdleTimeout))
+	}
+	if cfg.Server.MaxBodySize < 0 {
+		errs = append(errs, fmt.Sprintf("server.max_body_size must be non-negative, got %d", cfg.Server.MaxBodySize))
+	}
+	if cfg.Server.MaxResponseSize < 0 {
+		errs = append(errs, fmt.Sprintf("server.max_response_size must be non-negative, got %d", cfg.Server.MaxResponseSize))
+	}
+	if cfg.Server.StreamTimeout < 0 {
+		errs = append(errs, fmt.Sprintf("server.stream_timeout must be non-negative, got %d", cfg.Server.StreamTimeout))
+	}
 
 	// Auth validation
 	if cfg.Auth.Enabled && cfg.Auth.Token == "" {
@@ -88,6 +114,26 @@ func validate(cfg *Config) error {
 		if threshold < 0 || threshold > 100 {
 			errs = append(errs, fmt.Sprintf("security.budget.alert_thresholds[%d] must be between 0 and 100, got %.1f", i, threshold))
 		}
+	}
+
+	// Resilience validation
+	if cfg.Resilience.RetryMaxAttempts < 0 {
+		errs = append(errs, fmt.Sprintf("resilience.retry_max_attempts must be non-negative, got %d", cfg.Resilience.RetryMaxAttempts))
+	}
+	if cfg.Resilience.RetryBaseDelayMs < 0 {
+		errs = append(errs, fmt.Sprintf("resilience.retry_base_delay_ms must be non-negative, got %d", cfg.Resilience.RetryBaseDelayMs))
+	}
+	if cfg.Resilience.RetryMaxDelayMs < 0 {
+		errs = append(errs, fmt.Sprintf("resilience.retry_max_delay_ms must be non-negative, got %d", cfg.Resilience.RetryMaxDelayMs))
+	}
+	if cfg.Resilience.CBFailureThreshold < 1 {
+		errs = append(errs, fmt.Sprintf("resilience.cb_failure_threshold must be at least 1, got %d", cfg.Resilience.CBFailureThreshold))
+	}
+	if cfg.Resilience.CBResetTimeoutSec <= 0 {
+		errs = append(errs, fmt.Sprintf("resilience.cb_reset_timeout_seconds must be positive, got %d", cfg.Resilience.CBResetTimeoutSec))
+	}
+	if cfg.Resilience.CBHalfOpenMax < 1 {
+		errs = append(errs, fmt.Sprintf("resilience.cb_half_open_max_calls must be at least 1, got %d", cfg.Resilience.CBHalfOpenMax))
 	}
 
 	// Metrics validation

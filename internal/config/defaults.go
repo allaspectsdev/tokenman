@@ -33,6 +33,43 @@ const DefaultCacheTTL = 300
 // DefaultProviderTimeout is the default provider timeout in seconds.
 const DefaultProviderTimeout = 30
 
+// DefaultReadTimeout is the default HTTP server read timeout in seconds.
+const DefaultReadTimeout = 10
+
+// DefaultWriteTimeout is the default HTTP server write timeout in seconds.
+// Set high (5 minutes) to accommodate LLM streaming responses.
+const DefaultWriteTimeout = 300
+
+// DefaultIdleTimeout is the default HTTP server idle timeout in seconds.
+const DefaultIdleTimeout = 120
+
+// DefaultMaxBodySize is the default maximum request body size in bytes (10 MB).
+const DefaultMaxBodySize = 10 << 20
+
+// DefaultMaxResponseSize is the default maximum upstream response size in bytes (100 MB).
+const DefaultMaxResponseSize int64 = 100 << 20
+
+// DefaultStreamTimeout is the default streaming connection timeout in seconds (10 min).
+const DefaultStreamTimeout = 600
+
+// DefaultRetryMaxAttempts is the default maximum number of retry attempts per provider.
+const DefaultRetryMaxAttempts = 3
+
+// DefaultRetryBaseDelayMs is the default base delay for exponential backoff in milliseconds.
+const DefaultRetryBaseDelayMs = 500
+
+// DefaultRetryMaxDelayMs is the default maximum delay for exponential backoff in milliseconds.
+const DefaultRetryMaxDelayMs = 30000
+
+// DefaultCBFailureThreshold is the default number of consecutive failures before opening the circuit.
+const DefaultCBFailureThreshold = 5
+
+// DefaultCBResetTimeout is the default circuit breaker reset timeout in seconds.
+const DefaultCBResetTimeout = 60
+
+// DefaultCBHalfOpenMax is the default number of successful calls in half-open state to close the circuit.
+const DefaultCBHalfOpenMax = 1
+
 // DefaultBudgetAlertThresholds are the default alert thresholds (percentages).
 var DefaultBudgetAlertThresholds = []float64{50, 75, 90}
 
@@ -49,10 +86,19 @@ var ValidInjectionActions = []string{"log", "block", "sanitize", "warn"}
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			ProxyPort:     DefaultProxyPort,
-			DashboardPort: DefaultDashboardPort,
-			LogLevel:      DefaultLogLevel,
-			DataDir:       DefaultDataDir,
+			ProxyPort:       DefaultProxyPort,
+			DashboardPort:   DefaultDashboardPort,
+			LogLevel:        DefaultLogLevel,
+			DataDir:         DefaultDataDir,
+			TLSEnabled:      false,
+			CertFile:        "",
+			KeyFile:         "",
+			ReadTimeout:     DefaultReadTimeout,
+			WriteTimeout:    DefaultWriteTimeout,
+			IdleTimeout:     DefaultIdleTimeout,
+			MaxBodySize:     DefaultMaxBodySize,
+			MaxResponseSize: DefaultMaxResponseSize,
+			StreamTimeout:   DefaultStreamTimeout,
 		},
 		Auth: AuthConfig{
 			Enabled: false,
@@ -136,9 +182,19 @@ func DefaultConfig() *Config {
 				ProviderLimits: map[string]ProviderRateLimit{},
 			},
 		},
+		Resilience: ResilienceConfig{
+			RetryMaxAttempts:   DefaultRetryMaxAttempts,
+			RetryBaseDelayMs:   DefaultRetryBaseDelayMs,
+			RetryMaxDelayMs:    DefaultRetryMaxDelayMs,
+			CBEnabled:          true,
+			CBFailureThreshold: DefaultCBFailureThreshold,
+			CBResetTimeoutSec:  DefaultCBResetTimeout,
+			CBHalfOpenMax:      DefaultCBHalfOpenMax,
+		},
 		Dashboard: DashboardConfig{
-			Enabled:  true,
-			AutoOpen: false,
+			Enabled:        true,
+			AutoOpen:       false,
+			AllowedOrigins: []string{"*"},
 		},
 		Metrics: MetricsConfig{
 			RetentionDays:   DefaultRetentionDays,

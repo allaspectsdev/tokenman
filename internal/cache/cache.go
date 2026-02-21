@@ -199,6 +199,12 @@ func (c *CacheMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Req
 	return resp, nil
 }
 
+// SetTTL updates the cache TTL for new entries. Existing cached entries retain
+// their original expiration. This is called when the config is hot-reloaded.
+func (c *CacheMiddleware) SetTTL(ttlSeconds int) {
+	c.ttl = time.Duration(ttlSeconds) * time.Second
+}
+
 // StartPurger starts a background goroutine that periodically purges expired
 // entries from the persistent store and evicts expired entries from the
 // in-memory LRU. It runs every 5 minutes until the context is cancelled.

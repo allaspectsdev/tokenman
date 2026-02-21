@@ -150,6 +150,23 @@ func (rl *RateLimitMiddleware) resolveProvider(req *pipeline.Request) string {
 	}
 }
 
+// Reconfigure replaces the default rate/burst and rebuilds all token buckets
+// with the new settings. This is called when the config is hot-reloaded.
+func (rl *RateLimitMiddleware) Reconfigure(defaultRate float64, defaultBurst int, providerLimits map[string]config.ProviderRateLimit) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	rl.defaultRate = defaultRate
+	rl.defaultBurst = defaultBurst
+
+	// Rebuild all buckets.
+	newLimiters := make(map[string]*tokenBucket, len(providerLimits))
+	for name, pl := range providerLimits {
+		newLimiters[name] = newTokenBucket(pl.Rate, pl.Burst)
+	}
+	rl.limiters = newLimiters
+}
+
 // getOrCreateBucket returns the token bucket for a provider, creating one
 // with default settings if it does not exist yet.
 func (rl *RateLimitMiddleware) getOrCreateBucket(provider string) *tokenBucket {

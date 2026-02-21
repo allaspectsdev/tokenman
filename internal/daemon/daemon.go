@@ -120,6 +120,7 @@ func Run(cfg *config.Config, foreground bool) error {
 				log.Info().Msg("configuration reloaded")
 				newLevel := parseLogLevel(newCfg.Server.LogLevel)
 				zerolog.SetGlobalLevel(newLevel)
+				// Hot-reload refresh is wired below after middleware creation.
 			})
 			log.Info().Str("file", configFile).Msg("config watcher started")
 		}
@@ -234,6 +235,21 @@ func Run(cfg *config.Config, foreground bool) error {
 		rulesMW,      // compression: text rules
 		historyMW,    // compression: history windowing
 	)
+
+	// Wire hot-reload refresh for middleware that supports reconfiguration.
+	if watcher != nil {
+		watcher.OnChange(func(old, newCfg *config.Config) {
+			rateLimitMW.Reconfigure(
+				newCfg.Security.RateLimit.DefaultRate,
+				newCfg.Security.RateLimit.DefaultBurst,
+				newCfg.Security.RateLimit.ProviderLimits,
+			)
+			log.Info().Msg("rate limiter reconfigured")
+
+			cacheMW.SetTTL(newCfg.Metrics.CacheTTLSeconds)
+			log.Info().Msg("cache TTL updated")
+		})
+	}
 
 	// 8e. Create proxy server.
 	upstreamClient := proxy.NewUpstreamClient()

@@ -70,7 +70,7 @@ key_ref  = "keyring://tokenman/anthropic"
 models   = ["claude-sonnet-4-20250514", "claude-haiku-4-20250414"]
 enabled  = true
 priority = 1
-timeout  = "30s"
+timeout  = 30
 
 [providers.openai]
 name     = "OpenAI"
@@ -79,7 +79,7 @@ key_ref  = "keyring://tokenman/openai"
 models   = ["gpt-4o", "gpt-4o-mini"]
 enabled  = true
 priority = 2
-timeout  = "30s"
+timeout  = 30
 
 # ----------------------------------------------------------------------------
 # Routing

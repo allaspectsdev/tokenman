@@ -39,7 +39,28 @@
 - Custom Prometheus text exposition: labeled counters, histograms (with cumulative bucket counts, sum, count), and gauges — no external Prometheus client library dependency
 - All existing tests pass, plus new readiness probe tests
 
-### 3.6 OpenTelemetry tracing (deferred — optional)
+### Phase 4: Testing & Deployment (Done)
+
+- **4.1 Integration tests** — Full request flow tests in `integration_test.go`: Anthropic/OpenAI normal requests, streaming, upstream 429/500 propagation, retry success, circuit breaker trip, request persistence, project header, max body size, response size limit, models endpoint, health/readiness endpoints
+- **4.2 Package tests** — New test files for all previously untested packages:
+  - `config/config_test.go` — Load with temp TOML, env var overrides, export/import, defaults
+  - `config/validate_test.go` — Validation edge cases: bad ports, log levels, TLS, resilience, budgets, PII/injection actions
+  - `daemon/pidfile_test.go` — WritePID/ReadPID/RemovePID/IsRunning with temp directories
+  - `vault/vault_test.go` — ResolveKeyRef with env:/keyring:/keychain: formats, error cases
+  - `metrics/collector_test.go` — Atomic operations, Stats aggregation, concurrent records, labeled metrics
+  - `metrics/api_test.go` — All dashboard API endpoints via httptest, auth middleware, CORS
+  - `plugin/registry_test.go` — Register/Unregister/List, duplicate detection, middleware categorization, CloseAll
+  - `store/store_test.go` — Open/Close, InsertRequest/GetRequest, ListRequests, GetRequestStats, Prune, concurrent read/write, WAL mode, migrations
+- **4.3 Streaming tests** — `streaming_test.go`: Anthropic/OpenAI SSE formats, accumulator cap, context cancellation, empty stream, extractDelta for all formats
+- **4.4 Timeout config fix** — Changed example TOML `timeout = "30s"` to `timeout = 30` (integer seconds matching the `int` field type)
+- **4.5 Hot-reload refresh** — `RateLimitMiddleware.Reconfigure()` rebuilds token buckets, `CacheMiddleware.SetTTL()` updates TTL; both wired into daemon's config watcher `OnChange` callback
+- **4.6 Production Dockerfile** — Multi-stage build (Go 1.25 builder + Alpine 3.21 runtime), non-root `tokenman` user, `/data` volume, HEALTHCHECK, exposed ports 7677/7678, `docker-build` and `docker-run` Makefile targets, `.dockerignore`
+
+---
+
+## Remaining (Optional / Low Priority)
+
+### OpenTelemetry tracing (deferred)
 
 **Issue:** No distributed tracing or correlation ID propagation.
 
@@ -48,87 +69,8 @@
 - Inject trace context via chi middleware
 - Create spans for: pipeline processing, upstream forward, each middleware
 - Propagate `X-Request-Id` / `traceparent` headers to upstream
-- This is lower priority than the other observability items
 
 **Files:** New `internal/tracing/` package, `internal/proxy/handler.go`, `internal/daemon/daemon.go`, `go.mod`
-
----
-
-## Phase 4: Testing & Deployment
-
-### 4.1 Integration tests for full request flow
-
-**Issue:** No end-to-end tests that exercise proxy -> pipeline -> upstream mock -> response.
-
-**Plan:**
-- Create `internal/proxy/integration_test.go` with `TestIntegration_` prefix
-- Test scenarios: normal request, cache hit, streaming, budget exceeded, provider failover, circuit breaker trip, retry success, upstream 429 propagation
-- Use `httptest.Server` as upstream mock, real pipeline chain with real middleware instances, in-memory SQLite store
-
-**Files:** `internal/proxy/integration_test.go`
-
-### 4.2 Tests for untested packages
-
-**Package test gaps and plan for each:**
-
-| Package | Plan |
-|---------|------|
-| `internal/config/` | Test `Load()` with temp TOML files, env var overrides, validation edge cases (bad ports, missing TLS files, invalid resilience values) |
-| `internal/daemon/` | Test `WritePID`/`ReadPID`/`RemovePID`/`IsRunning` with temp directories. Test `runPruner` cancellation. |
-| `internal/vault/` | Test `ResolveKeyRef` with `env://` refs (mock env vars), error cases for missing keys |
-| `internal/metrics/` | Test `Collector` atomic operations, `Stats` aggregation, dashboard API endpoints with `httptest` |
-| `internal/plugin/` | Test `Registry` lifecycle: register, get, list, enable/disable |
-| `internal/store/` (core) | Test `Open`/`Close`, `InsertRequest`/`GetRequests`, `Prune`, concurrent read/write, WAL mode verification |
-
-**Files:** `internal/config/config_test.go`, `internal/config/validate_test.go`, `internal/daemon/pidfile_test.go`, `internal/vault/vault_test.go`, `internal/metrics/collector_test.go`, `internal/metrics/api_test.go`, `internal/plugin/registry_test.go`, `internal/store/store_test.go`
-
-### 4.3 Streaming tests
-
-**Issue:** No tests for SSE streaming path.
-
-**Plan:**
-- Test `HandleStreaming` with mock SSE responses (Anthropic and OpenAI formats)
-- Test accumulator cap behavior
-- Test context cancellation (stream timeout)
-- Test upstream error response before SSE parsing
-
-**Files:** `internal/proxy/streaming_test.go`
-
-### 4.4 Fix timeout config type mismatch
-
-**Issue (#9):** `ProviderConfig.Timeout` is `int` (seconds) but `tokenman.example.toml` uses `"30s"` string format. The `StringToTimeDurationHookFunc` in viper converts strings to `time.Duration`, not `int`. Using the example config as-is will fail on startup.
-
-**Plan:**
-- Change `ProviderConfig.Timeout` from `int` to `int` and fix example config to use `30` (integer seconds), OR
-- Change the field to `time.Duration` and update `TimeoutDuration()` accordingly
-- Simplest fix: change the example TOML from `"30s"` to `30` since the field is documented as seconds
-
-**Files:** `configs/tokenman.example.toml` (or `internal/config/config.go` if changing the type)
-
-### 4.5 Hot-reload refresh for rate limit buckets and cache TTLs
-
-**Issue (#17):** Config hot-reload updates the atomic config pointer but doesn't refresh existing rate limiter token buckets or cache TTL values. Changes require a restart.
-
-**Plan:**
-- Add a `Reconfigure(rate, burst)` method to `RateLimitMiddleware` that rebuilds the token buckets
-- Add a `SetTTL(ttl)` method to `CacheMiddleware`
-- In the `watcher.OnChange` callback in `daemon.go`, call these methods with the new config values
-- Consider which other middleware might benefit from hot-reload (budget limits, PII settings)
-
-**Files:** `internal/security/ratelimit.go`, `internal/cache/cache.go`, `internal/daemon/daemon.go`
-
-### 4.6 Production Dockerfile
-
-**Issue (#24):** No container build target.
-
-**Plan:**
-- Multi-stage Dockerfile: Go builder stage + minimal `scratch` or `alpine` runtime stage
-- Non-root user, read-only filesystem (except data dir volume)
-- `HEALTHCHECK` instruction using `/health`
-- Expose ports 7677 and 7678
-- Add `docker-build` and `docker-run` targets to Makefile
-
-**Files:** `Dockerfile`, `Makefile`, `.dockerignore`
 
 ---
 
@@ -138,7 +80,7 @@
 
 **Risk:** Latent race if hot-reload ever updates providers at runtime.
 
-**Fix:** Wrap `h.providers` with `sync.RWMutex` or use `atomic.Pointer`. Low urgency since providers are only set once at startup today, but becomes critical if Phase 4.5 (hot-reload) extends to provider config.
+**Fix:** Wrap `h.providers` with `sync.RWMutex` or use `atomic.Pointer`. Low urgency since providers are only set once at startup today, but becomes critical if hot-reload extends to provider config.
 
 **Files:** `internal/proxy/handler.go`
 
@@ -157,18 +99,3 @@
 **Fix:** Log errors from `InsertRequest` calls. Consider a buffered retry queue for transient DB errors.
 
 **Files:** `internal/proxy/handler.go`, `internal/cache/cache.go`, `internal/security/budget.go`
-
----
-
-## Recommended Priority Order
-
-1. **Phase 3.1 + 3.2** — Error counters and latency histograms (highest operational impact)
-2. **Phase 4.4** — Fix timeout config type mismatch (correctness bug)
-3. **Phase 4.2 + 4.3** — Test coverage (confidence for all changes)
-4. **Phase 3.4** — Readiness probe (required for Kubernetes)
-5. **Phase 4.1** — Integration tests
-6. **Phase 3.3 + 3.5** — Provider health metrics and middleware timing
-7. **Phase 4.5** — Hot-reload refresh
-8. **Phase 4.6** — Dockerfile
-9. **Phase 3.6** — OpenTelemetry (nice-to-have)
-10. **M1-M3** — Address as encountered

@@ -8,7 +8,7 @@ LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION) \
            -X $(MODULE)/internal/version.GitCommit=$(COMMIT) \
            -X $(MODULE)/internal/version.BuildDate=$(DATE)
 
-.PHONY: build test lint clean run
+.PHONY: build test lint clean run docker-build docker-run
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/tokenman
@@ -25,3 +25,17 @@ clean:
 
 run: build
 	./bin/$(BINARY) start --foreground
+
+docker-build:
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) \
+		-t tokenman:$(VERSION) \
+		-t tokenman:latest .
+
+docker-run:
+	docker run --rm -it \
+		-p 7677:7677 -p 7678:7678 \
+		-v tokenman-data:/data \
+		tokenman:latest

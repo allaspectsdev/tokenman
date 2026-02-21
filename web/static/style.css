@@ -1,0 +1,486 @@
+/* ========================================================================
+   TokenMan Dashboard - Dark Theme Stylesheet
+   ======================================================================== */
+
+:root {
+    --bg-primary: #0f0f1a;
+    --bg-secondary: #1a1a2e;
+    --bg-card: #16213e;
+    --bg-input: #0d1b2a;
+    --text-primary: #e0e0e0;
+    --text-secondary: #8892a4;
+    --text-muted: #5a6578;
+    --border: #2a2a4a;
+    --green: #00d4aa;
+    --green-dim: rgba(0, 212, 170, 0.15);
+    --red: #ff6b6b;
+    --red-dim: rgba(255, 107, 107, 0.15);
+    --blue: #4ecdc4;
+    --blue-dim: rgba(78, 205, 196, 0.15);
+    --purple: #a855f7;
+    --purple-dim: rgba(168, 85, 247, 0.15);
+    --yellow: #fbbf24;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+    --radius: 8px;
+    --radius-sm: 4px;
+    --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Cascadia Code", "Consolas", monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 14px;
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* ---- Header ---- */
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 2rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: -0.02em;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.75rem;
+    background: var(--green-dim);
+    border: 1px solid var(--green);
+    border-radius: 20px;
+    font-size: 0.8rem;
+    color: var(--green);
+    font-weight: 500;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+
+.uptime-label {
+    color: var(--text-secondary);
+}
+
+.uptime-value {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* ---- Main Content ---- */
+.main {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 1.5rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* ---- Summary Cards ---- */
+.cards-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+
+.card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem;
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.card-icon {
+    font-size: 1.8rem;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    flex-shrink: 0;
+}
+
+.card-savings .card-icon {
+    background: var(--green-dim);
+    color: var(--green);
+}
+
+.card-cost .card-icon {
+    background: var(--red-dim);
+    color: var(--red);
+}
+
+.card-requests .card-icon {
+    background: var(--blue-dim);
+    color: var(--blue);
+}
+
+.card-cache .card-icon {
+    background: var(--purple-dim);
+    color: var(--purple);
+}
+
+.card-body {
+    min-width: 0;
+}
+
+.card-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+}
+
+.card-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-savings .card-value { color: var(--green); }
+.card-cost .card-value { color: var(--red); }
+.card-requests .card-value { color: var(--blue); }
+.card-cache .card-value { color: var(--purple); }
+
+.card-sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-top: 0.15rem;
+}
+
+/* ---- Panels ---- */
+.panel {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    padding: 1.25rem;
+}
+
+.panel-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* ---- Chart & Budget Row ---- */
+.chart-budget-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1rem;
+}
+
+.chart-container {
+    position: relative;
+    width: 100%;
+    height: 280px;
+}
+
+.chart-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* ---- Budget Meters ---- */
+.budget-item {
+    margin-bottom: 1rem;
+}
+
+.budget-item:last-child {
+    margin-bottom: 0;
+}
+
+.budget-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.35rem;
+}
+
+.budget-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.budget-value {
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+    min-width: 0;
+}
+
+.progress-green { background: var(--green); }
+.progress-blue { background: var(--blue); }
+.progress-purple { background: var(--purple); }
+.progress-red { background: var(--red); }
+.progress-yellow { background: var(--yellow); }
+
+/* ---- Providers List ---- */
+.providers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.provider-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+}
+
+.provider-name {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.provider-status {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.provider-enabled {
+    background: var(--green-dim);
+    color: var(--green);
+}
+
+.provider-disabled {
+    background: var(--red-dim);
+    color: var(--red);
+}
+
+.provider-placeholder {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    padding: 0.5rem 0;
+}
+
+/* ---- Tables ---- */
+.table-panel {
+    overflow: hidden;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.data-table th {
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    background: var(--bg-card);
+    position: sticky;
+    top: 0;
+}
+
+.data-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid rgba(42, 42, 74, 0.5);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.data-table tbody tr:nth-child(even) {
+    background: rgba(22, 33, 62, 0.5);
+}
+
+.data-table tbody tr:hover {
+    background: rgba(78, 205, 196, 0.05);
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 2rem 1rem !important;
+    font-family: var(--font-sans) !important;
+    font-style: italic;
+}
+
+/* ---- Tag / Badge styles for table cells ---- */
+.tag {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    font-family: var(--font-mono);
+}
+
+.tag-green {
+    background: var(--green-dim);
+    color: var(--green);
+}
+
+.tag-red {
+    background: var(--red-dim);
+    color: var(--red);
+}
+
+.tag-blue {
+    background: var(--blue-dim);
+    color: var(--blue);
+}
+
+.tag-yellow {
+    background: rgba(251, 191, 36, 0.15);
+    color: var(--yellow);
+}
+
+.tag-muted {
+    background: rgba(90, 101, 120, 0.2);
+    color: var(--text-muted);
+}
+
+.cost-text { color: var(--red); }
+.savings-text { color: var(--green); }
+
+/* ---- Footer ---- */
+.footer {
+    text-align: center;
+    padding: 1.5rem 2rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    border-top: 1px solid var(--border);
+    margin-top: 1rem;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 1200px) {
+    .cards-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 900px) {
+    .chart-budget-row {
+        grid-template-columns: 1fr;
+    }
+
+    .header {
+        flex-direction: column;
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+}
+
+@media (max-width: 640px) {
+    .cards-row {
+        grid-template-columns: 1fr;
+    }
+
+    .main {
+        padding: 1rem;
+    }
+
+    .header {
+        padding: 1rem;
+    }
+
+    html {
+        font-size: 13px;
+    }
+}

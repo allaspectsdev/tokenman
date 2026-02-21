@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TokenMan Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- Status Header -->
+    <header class="header">
+        <div class="header-left">
+            <h1 class="logo">TokenMan</h1>
+            <span class="status-badge" id="status-badge">
+                <span class="status-dot"></span>
+                <span id="status-text">Running</span>
+            </span>
+        </div>
+        <div class="header-right">
+            <span class="uptime-label">Uptime:</span>
+            <span class="uptime-value" id="uptime">--</span>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Summary Cards -->
+        <section class="cards-row">
+            <div class="card card-savings">
+                <div class="card-icon">&#36;</div>
+                <div class="card-body">
+                    <div class="card-label">Total Savings</div>
+                    <div class="card-value" id="total-savings">$0.00</div>
+                    <div class="card-sub" id="savings-percent">0% saved</div>
+                </div>
+            </div>
+            <div class="card card-cost">
+                <div class="card-icon">&#9733;</div>
+                <div class="card-body">
+                    <div class="card-label">Total Cost</div>
+                    <div class="card-value" id="total-cost">$0.00</div>
+                    <div class="card-sub" id="total-tokens">0 tokens</div>
+                </div>
+            </div>
+            <div class="card card-requests">
+                <div class="card-icon">&#8644;</div>
+                <div class="card-body">
+                    <div class="card-label">Total Requests</div>
+                    <div class="card-value" id="total-requests">0</div>
+                    <div class="card-sub" id="active-requests">0 active</div>
+                </div>
+            </div>
+            <div class="card card-cache">
+                <div class="card-icon">&#9889;</div>
+                <div class="card-body">
+                    <div class="card-label">Cache Hit Rate</div>
+                    <div class="card-value" id="cache-hit-rate">0%</div>
+                    <div class="card-sub" id="cache-counts">0 hits / 0 misses</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Spending Chart & Budget -->
+        <section class="chart-budget-row">
+            <div class="panel chart-panel">
+                <h2 class="panel-title">Spending Over Time</h2>
+                <div class="chart-container">
+                    <canvas id="spending-chart"></canvas>
+                </div>
+            </div>
+            <div class="panel budget-panel">
+                <h2 class="panel-title">Budget Usage</h2>
+                <div class="budget-meters" id="budget-meters">
+                    <div class="budget-item">
+                        <div class="budget-header">
+                            <span class="budget-label">Hourly</span>
+                            <span class="budget-value" id="budget-hourly-value">$0 / $0</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-green" id="budget-hourly-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="budget-item">
+                        <div class="budget-header">
+                            <span class="budget-label">Daily</span>
+                            <span class="budget-value" id="budget-daily-value">$0 / $0</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-blue" id="budget-daily-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="budget-item">
+                        <div class="budget-header">
+                            <span class="budget-label">Monthly</span>
+                            <span class="budget-value" id="budget-monthly-value">$0 / $0</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill progress-purple" id="budget-monthly-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <h2 class="panel-title" style="margin-top: 1.5rem;">Providers</h2>
+                <div id="providers-list" class="providers-list">
+                    <div class="provider-placeholder">Loading...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recent Requests Table -->
+        <section class="panel table-panel">
+            <h2 class="panel-title">Recent Requests</h2>
+            <div class="table-wrapper">
+                <table class="data-table" id="requests-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Model</th>
+                            <th>Tokens In</th>
+                            <th>Tokens Out</th>
+                            <th>Cost</th>
+                            <th>Savings</th>
+                            <th>Cache</th>
+                            <th>Latency</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="requests-body">
+                        <tr>
+                            <td colspan="9" class="empty-state">No requests yet</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- PII Security Log -->
+        <section class="panel table-panel">
+            <h2 class="panel-title">PII Detection Log</h2>
+            <div class="table-wrapper">
+                <table class="data-table" id="pii-table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Request ID</th>
+                            <th>PII Type</th>
+                            <th>Action</th>
+                            <th>Field</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pii-body">
+                        <tr>
+                            <td colspan="5" class="empty-state">No PII detections</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <span>TokenMan &mdash; LLM Token Optimizer</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

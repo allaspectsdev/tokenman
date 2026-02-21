@@ -1,0 +1,164 @@
+# ============================================================================
+# TokenMan Configuration
+# ============================================================================
+#
+# Location: ~/.tokenman/tokenman.toml  (or ./tokenman.toml)
+#
+# Every value below shows the built-in default. Uncomment and edit as needed.
+# Environment variables override file values using the TOKENMAN_ prefix with
+# underscores for nesting, e.g. TOKENMAN_SERVER_PROXY_PORT=8080.
+
+# ----------------------------------------------------------------------------
+# Server
+# ----------------------------------------------------------------------------
+[server]
+# Port the proxy server listens on.
+proxy_port = 7677
+
+# Port the dashboard web UI listens on.
+dashboard_port = 7678
+
+# Log level: trace, debug, info, warn, error, fatal.
+log_level = "info"
+
+# Data directory for SQLite database, logs, and other runtime files.
+# A leading ~ is expanded to the user's home directory.
+data_dir = "~/.tokenman"
+
+# ----------------------------------------------------------------------------
+# Auth  (dashboard authentication)
+# ----------------------------------------------------------------------------
+[auth]
+# Enable bearer-token authentication for the dashboard API.
+enabled = false
+
+# The token required for dashboard API requests.  Only used when enabled=true.
+token = ""
+
+# ----------------------------------------------------------------------------
+# Providers
+# ----------------------------------------------------------------------------
+# Each provider is a table under [providers.<key>].
+# key_ref supports:
+#   keyring://tokenman/<provider>   – OS keyring (recommended)
+#   env://ENV_VAR_NAME              – environment variable
+#   file:///path/to/key             – plain-text file (not recommended)
+
+[providers.anthropic]
+name     = "Anthropic"
+api_base = "https://api.anthropic.com"
+key_ref  = "keyring://tokenman/anthropic"
+models   = ["claude-sonnet-4-20250514", "claude-haiku-4-20250414"]
+enabled  = true
+priority = 1
+timeout  = "30s"
+
+[providers.openai]
+name     = "OpenAI"
+api_base = "https://api.openai.com"
+key_ref  = "keyring://tokenman/openai"
+models   = ["gpt-4o", "gpt-4o-mini"]
+enabled  = true
+priority = 2
+timeout  = "30s"
+
+# ----------------------------------------------------------------------------
+# Routing
+# ----------------------------------------------------------------------------
+[routing]
+# Provider used when no model-specific mapping matches.
+default_provider = "anthropic"
+
+# Model to use for heartbeat / health-check requests (empty = disabled).
+heartbeat_model = ""
+
+# When true, requests are retried on the next provider if the primary fails.
+fallback_enabled = true
+
+# Explicit model-to-provider overrides.
+# Example: { "gpt-4o" = "openai", "claude-sonnet-4-20250514" = "anthropic" }
+[routing.model_map]
+
+# ----------------------------------------------------------------------------
+# Compression
+# ----------------------------------------------------------------------------
+
+[compression.dedup]
+# Enable deduplication of repeated content blocks.
+enabled = true
+# Time-to-live for the dedup cache in seconds.
+ttl_seconds = 300
+
+[compression.rules]
+# Collapse consecutive whitespace in text content.
+collapse_whitespace = true
+# Minify JSON payloads embedded in messages.
+minify_json = true
+# Minify XML payloads embedded in messages.
+minify_xml = true
+# Deduplicate repeated system/instruction blocks.
+dedup_instructions = true
+# Strip Markdown formatting from text (aggressive – use with caution).
+strip_markdown = false
+
+[compression.heartbeat]
+# Enable heartbeat deduplication (collapse near-identical polling requests).
+enabled = true
+# Time window in seconds within which identical requests are deduplicated.
+dedup_window_seconds = 30
+# Model to use for heartbeat responses (empty = auto-detect).
+heartbeat_model = ""
+
+[compression.history]
+# Enable conversation history window compression.
+enabled = true
+# Number of recent turns to keep uncompressed.
+window_size = 10
+
+# ----------------------------------------------------------------------------
+# Security
+# ----------------------------------------------------------------------------
+
+[security.pii]
+# Enable PII detection in request/response payloads.
+enabled = true
+# Action when PII is detected: redact, hash, log, block.
+action = "redact"
+# List of strings that should never be flagged as PII.
+allow_list = []
+
+[security.injection]
+# Enable prompt-injection detection.
+enabled = true
+# Action when injection is detected: log, block, warn.
+action = "log"
+
+[security.budget]
+# Enable spend budget enforcement.
+enabled = false
+# Maximum spend per hour in cents (0 = unlimited).
+hourly_limit = 0
+# Maximum spend per day in cents (0 = unlimited).
+daily_limit = 0
+# Maximum spend per month in cents (0 = unlimited).
+monthly_limit = 0
+# Alert when spend reaches these percentages of the active limit.
+alert_thresholds = [50.0, 75.0, 90.0]
+
+# ----------------------------------------------------------------------------
+# Dashboard
+# ----------------------------------------------------------------------------
+[dashboard]
+# Enable the web dashboard.
+enabled = true
+# Automatically open the dashboard in the default browser on start.
+auto_open = false
+
+# ----------------------------------------------------------------------------
+# Metrics
+# ----------------------------------------------------------------------------
+[metrics]
+# Number of days to retain metrics in the SQLite database.
+retention_days = 30
+# TTL for the in-memory metrics cache in seconds.
+cache_ttl_seconds = 300

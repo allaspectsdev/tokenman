@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/allaspects/tokenman/internal/compress"
@@ -47,6 +48,7 @@ type ProxyHandler struct {
 	chain           *pipeline.Chain
 	client          *UpstreamClient
 	logger          zerolog.Logger
+	providersMu     sync.RWMutex
 	providers       map[string]ProviderConfig
 	collector       *metrics.Collector
 	tokenizer       *tokenizer.Tokenizer
@@ -94,14 +96,31 @@ func NewProxyHandler(
 	}
 }
 
-// SetProviders configures the model-to-provider mapping.
+// SetProviders configures the model-to-provider mapping. It is safe to call
+// concurrently with request handling.
 func (h *ProxyHandler) SetProviders(providers map[string]ProviderConfig) {
+	h.providersMu.Lock()
 	h.providers = providers
+	h.providersMu.Unlock()
+}
+
+// snapshotProviders returns a shallow copy of the providers map under a read lock.
+func (h *ProxyHandler) snapshotProviders() map[string]ProviderConfig {
+	h.providersMu.RLock()
+	cp := make(map[string]ProviderConfig, len(h.providers))
+	for k, v := range h.providers {
+		cp[k] = v
+	}
+	h.providersMu.RUnlock()
+	return cp
 }
 
 // resolveProvider looks up the provider configuration for the given model name.
 // It returns the base URL, API key, format, and an error if no provider is found.
 func (h *ProxyHandler) resolveProvider(model string) (baseURL, apiKey string, format pipeline.APIFormat, err error) {
+	h.providersMu.RLock()
+	defer h.providersMu.RUnlock()
+
 	if p, ok := h.providers[model]; ok {
 		return p.BaseURL, p.APIKey, p.Format, nil
 	}
@@ -120,6 +139,9 @@ func (h *ProxyHandler) resolveProvider(model string) (baseURL, apiKey string, fo
 // logic. It iterates through all configured providers, checking circuit breaker
 // state, and retries on transient failures with exponential backoff.
 func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.Request, logger zerolog.Logger) (*http.Response, error) {
+	// Snapshot providers under read lock to avoid holding the lock during retries.
+	providers := h.snapshotProviders()
+
 	// Build a list of candidate providers. Start with the exact match, then
 	// try all others as fallbacks.
 	type candidate struct {
@@ -129,12 +151,12 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 	var candidates []candidate
 
 	// Try exact match first.
-	if p, ok := h.providers[pipeReq.Model]; ok {
+	if p, ok := providers[pipeReq.Model]; ok {
 		candidates = append(candidates, candidate{name: pipeReq.Model, config: p})
 	}
 
 	// Add prefix matches and other providers as fallbacks.
-	for key, p := range h.providers {
+	for key, p := range providers {
 		if key == pipeReq.Model {
 			continue // already added
 		}
@@ -146,7 +168,7 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 
 	// If no candidates found at all, try all providers.
 	if len(candidates) == 0 {
-		for key, p := range h.providers {
+		for key, p := range providers {
 			candidates = append(candidates, candidate{name: key, config: p})
 		}
 	}
@@ -394,7 +416,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			h.collector.Record(pipeReq, cacheResp)
 		}
 		if h.store != nil {
-			h.store.InsertRequest(&store.Request{
+			if err := h.store.InsertRequest(&store.Request{
 				ID:           requestID,
 				Timestamp:    startTime.UTC().Format(time.RFC3339),
 				Method:       r.Method,
@@ -409,7 +431,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				RequestBody:  bodyForStore(body),
 				ResponseBody: bodyForStore(cachedResp.Body),
 				Project:      project,
-			})
+			}); err != nil {
+				logger.Error().Err(err).Msg("failed to persist request record")
+			}
 		}
 		return
 	}
@@ -482,7 +506,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 		// Persist request record for upstream errors.
 		if h.store != nil {
-			h.store.InsertRequest(&store.Request{
+			if err := h.store.InsertRequest(&store.Request{
 				ID:           requestID,
 				Timestamp:    startTime.UTC().Format(time.RFC3339),
 				Method:       r.Method,
@@ -496,7 +520,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				RequestBody:  bodyForStore(body),
 				ResponseBody: bodyForStore(errBody),
 				Project:      project,
-			})
+			}); err != nil {
+				logger.Error().Err(err).Msg("failed to persist request record")
+			}
 		}
 
 		// Forward upstream response headers and body.
@@ -544,7 +570,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 		// Persist request record.
 		if h.store != nil {
-			h.store.InsertRequest(&store.Request{
+			if err := h.store.InsertRequest(&store.Request{
 				ID:           requestID,
 				Timestamp:    startTime.UTC().Format(time.RFC3339),
 				Method:       r.Method,
@@ -564,7 +590,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				Provider:     pipeResp.Provider,
 				RequestBody:  bodyForStore(body),
 				Project:      project,
-			})
+			}); err != nil {
+				logger.Error().Err(err).Msg("failed to persist request record")
+			}
 		}
 
 		// Observe request latency.
@@ -631,7 +659,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Persist request record.
 	if h.store != nil {
-		h.store.InsertRequest(&store.Request{
+		if err := h.store.InsertRequest(&store.Request{
 			ID:           requestID,
 			Timestamp:    startTime.UTC().Format(time.RFC3339),
 			Method:       r.Method,
@@ -652,7 +680,9 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			RequestBody:  bodyForStore(body),
 			ResponseBody: bodyForStore(respBody),
 			Project:      project,
-		})
+		}); err != nil {
+			logger.Error().Err(err).Msg("failed to persist request record")
+		}
 	}
 
 	// Write the response body.
@@ -719,7 +749,9 @@ func (h *ProxyHandler) HandleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check provider availability.
+	h.providersMu.RLock()
 	providerCount := len(h.providers)
+	h.providersMu.RUnlock()
 	if providerCount > 0 {
 		checks = append(checks, checkResult{Name: "providers", Status: "ok"})
 	} else {
@@ -755,6 +787,7 @@ func (h *ProxyHandler) HandleModels(w http.ResponseWriter, r *http.Request) {
 	var format pipeline.APIFormat
 	var found bool
 
+	h.providersMu.RLock()
 	for _, p := range h.providers {
 		baseURL = p.BaseURL
 		apiKey = p.APIKey
@@ -762,6 +795,7 @@ func (h *ProxyHandler) HandleModels(w http.ResponseWriter, r *http.Request) {
 		found = true
 		break
 	}
+	h.providersMu.RUnlock()
 
 	if !found {
 		logger.Warn().Msg("no providers configured for models endpoint")

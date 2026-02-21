@@ -388,6 +388,19 @@ func Run(cfg *config.Config, foreground bool) error {
 		log.Error().Err(err).Msg("proxy server shutdown error")
 	}
 
+	// Drain any remaining errors from server goroutines to prevent goroutine leaks.
+	for {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				log.Error().Err(err).Msg("server error during shutdown")
+			}
+		default:
+			goto drained
+		}
+	}
+drained:
+
 	// 12. Clean up — wait for background goroutines before closing the store.
 	pruneCancel()
 	<-purgerDone

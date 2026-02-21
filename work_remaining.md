@@ -74,28 +74,27 @@
 
 ---
 
-## Medium Issues (Address Opportunistically)
+## Medium Issues (Done)
 
-### M1. Providers map not thread-safe (#18)
+### M1. Providers map thread-safe (Done)
 
-**Risk:** Latent race if hot-reload ever updates providers at runtime.
-
-**Fix:** Wrap `h.providers` with `sync.RWMutex` or use `atomic.Pointer`. Low urgency since providers are only set once at startup today, but becomes critical if hot-reload extends to provider config.
+- Added `sync.RWMutex` to `ProxyHandler` for `providers` map access
+- `SetProviders()` uses write lock, `resolveProvider()` uses read lock
+- `snapshotProviders()` copies map under read lock for retry loops
+- `HandleReady` and `HandleModels` use read locks for provider iteration
 
 **Files:** `internal/proxy/handler.go`
 
-### M2. Error channel partial drain (#19)
+### M2. Error channel partial drain (Done)
 
-**Risk:** If both proxy and dashboard servers fail simultaneously, one error is dropped and a goroutine may block.
-
-**Fix:** Drain the error channel in a loop after shutdown, or switch to `errgroup`.
+- Added non-blocking drain loop after server shutdown to consume any remaining errors
+- Prevents goroutine leak when both proxy and dashboard servers fail simultaneously
 
 **Files:** `internal/daemon/daemon.go`
 
-### M3. Database persistence errors silently dropped (#13)
+### M3. Database persistence errors logged (Done)
 
-**Risk:** `InsertRequest()` failures mean silent data loss for metrics and audit.
+- All 4 `InsertRequest()` call sites now capture and log errors via `logger.Error()`
+- Call sites: cache hit path, upstream error path, streaming path, normal response path
 
-**Fix:** Log errors from `InsertRequest` calls. Consider a buffered retry queue for transient DB errors.
-
-**Files:** `internal/proxy/handler.go`, `internal/cache/cache.go`, `internal/security/budget.go`
+**Files:** `internal/proxy/handler.go`

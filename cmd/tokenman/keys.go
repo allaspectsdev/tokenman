@@ -6,7 +6,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/allaspects/tokenman/internal/vault"
+	"github.com/allaspectsdev/tokenman/internal/vault"
 	"golang.org/x/term"
 )
 

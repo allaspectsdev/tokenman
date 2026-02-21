@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // injectionPattern holds a compiled regex and a human-readable category

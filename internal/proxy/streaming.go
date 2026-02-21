@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // HandleStreaming processes a streaming upstream response by forwarding SSE events

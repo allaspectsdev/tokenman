@@ -11,7 +11,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // SummarizationConfig holds the configuration for the summarization middleware.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // HistoryMiddleware compresses older messages that fall outside a recent

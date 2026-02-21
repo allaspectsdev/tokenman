@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/allaspects/tokenman/internal/config"
-	"github.com/allaspects/tokenman/internal/store"
+	"github.com/allaspectsdev/tokenman/internal/config"
+	"github.com/allaspectsdev/tokenman/internal/store"
 )
 
 func setupDashboard(t *testing.T) (*DashboardServer, *Collector) {

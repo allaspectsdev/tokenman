@@ -16,19 +16,19 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/allaspects/tokenman/internal/cache"
-	"github.com/allaspects/tokenman/internal/compress"
-	"github.com/allaspects/tokenman/internal/config"
-	"github.com/allaspects/tokenman/internal/metrics"
-	"github.com/allaspects/tokenman/internal/pipeline"
-	"github.com/allaspects/tokenman/internal/proxy"
-	"github.com/allaspects/tokenman/internal/router"
-	"github.com/allaspects/tokenman/internal/security"
-	"github.com/allaspects/tokenman/internal/store"
-	"github.com/allaspects/tokenman/internal/tokenizer"
-	"github.com/allaspects/tokenman/internal/tracing"
-	"github.com/allaspects/tokenman/internal/vault"
-	"github.com/allaspects/tokenman/internal/version"
+	"github.com/allaspectsdev/tokenman/internal/cache"
+	"github.com/allaspectsdev/tokenman/internal/compress"
+	"github.com/allaspectsdev/tokenman/internal/config"
+	"github.com/allaspectsdev/tokenman/internal/metrics"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/proxy"
+	"github.com/allaspectsdev/tokenman/internal/router"
+	"github.com/allaspectsdev/tokenman/internal/security"
+	"github.com/allaspectsdev/tokenman/internal/store"
+	"github.com/allaspectsdev/tokenman/internal/tokenizer"
+	"github.com/allaspectsdev/tokenman/internal/tracing"
+	"github.com/allaspectsdev/tokenman/internal/vault"
+	"github.com/allaspectsdev/tokenman/internal/version"
 )
 
 // Run is the main daemon orchestrator. It initialises all subsystems,
@@ -177,7 +177,6 @@ func Run(cfg *config.Config, foreground bool) error {
 	// 8b. Init vault and resolve API keys for enabled providers.
 	v := vault.New()
 	providerConfigs := make(map[string]*router.ProviderConfig)
-	providerMap := make(map[string]proxy.ProviderConfig)
 
 	for name, pcfg := range cfg.Providers {
 		if !pcfg.Enabled {
@@ -208,15 +207,6 @@ func Run(cfg *config.Config, foreground bool) error {
 			Enabled:  true,
 			Priority: pcfg.Priority,
 			Timeout:  pcfg.TimeoutDuration(),
-		}
-
-		// Build provider map for proxy handler -- register each model.
-		for _, model := range pcfg.Models {
-			providerMap[model] = proxy.ProviderConfig{
-				BaseURL: pcfg.APIBase,
-				APIKey:  apiKey,
-				Format:  format,
-			}
 		}
 	}
 
@@ -310,8 +300,8 @@ func Run(cfg *config.Config, foreground bool) error {
 		streamTimeout,
 		cbRegistry,
 		retryConfig,
+		rtr,
 	)
-	proxyHandler.SetProviders(providerMap)
 
 	proxyAddr := fmt.Sprintf(":%d", cfg.Server.ProxyPort)
 	readTimeout := time.Duration(cfg.Server.ReadTimeout) * time.Second

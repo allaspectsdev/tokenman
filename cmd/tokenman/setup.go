@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/allaspects/tokenman/internal/config"
-	"github.com/allaspects/tokenman/internal/daemon"
+	"github.com/allaspectsdev/tokenman/internal/config"
+	"github.com/allaspectsdev/tokenman/internal/daemon"
 )
 
 func cmdStart(args []string) {

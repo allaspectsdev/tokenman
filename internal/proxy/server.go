@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/allaspects/tokenman/internal/tracing"
+	"github.com/allaspectsdev/tokenman/internal/tracing"
 )
 
 // Server is the HTTP server for the TokenMan proxy. It binds the chi router

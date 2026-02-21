@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // PIIDetection records a single detected PII instance.

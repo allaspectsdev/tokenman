@@ -3,7 +3,7 @@ package plugin
 import (
 	"context"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // Plugin defines the interface that all plugins must implement.

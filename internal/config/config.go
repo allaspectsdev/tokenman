@@ -342,6 +342,8 @@ func ExportConfig(path string) error {
 }
 
 // ImportConfig reads a TOML config file and merges it into the current config.
+// The imported config is also persisted to the active config file so changes
+// survive restarts.
 func ImportConfig(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -355,6 +357,18 @@ func ImportConfig(path string) error {
 		return err
 	}
 	set(cfg)
+
+	// Persist to the active config file so changes survive restart.
+	if dest := ConfigFilePath(); dest != "" {
+		out, err := toml.Marshal(cfg)
+		if err != nil {
+			return fmt.Errorf("marshalling config for persistence: %w", err)
+		}
+		if err := os.WriteFile(dest, out, 0o600); err != nil {
+			return fmt.Errorf("persisting imported config: %w", err)
+		}
+	}
+
 	return nil
 }
 

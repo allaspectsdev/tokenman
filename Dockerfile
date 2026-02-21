@@ -13,9 +13,9 @@ ARG COMMIT=unknown
 ARG DATE=unknown
 
 RUN CGO_ENABLED=0 go build \
-    -ldflags "-X github.com/allaspects/tokenman/internal/version.Version=${VERSION} \
-              -X github.com/allaspects/tokenman/internal/version.GitCommit=${COMMIT} \
-              -X github.com/allaspects/tokenman/internal/version.BuildDate=${DATE}" \
+    -ldflags "-X github.com/allaspectsdev/tokenman/internal/version.Version=${VERSION} \
+              -X github.com/allaspectsdev/tokenman/internal/version.GitCommit=${COMMIT} \
+              -X github.com/allaspectsdev/tokenman/internal/version.BuildDate=${DATE}" \
     -o /tokenman ./cmd/tokenman
 
 # Stage 2: Runtime

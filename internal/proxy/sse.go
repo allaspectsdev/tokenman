@@ -22,9 +22,13 @@ type SSEReader struct {
 }
 
 // NewSSEReader creates a new SSEReader that reads from the given io.Reader.
+// The scanner buffer is sized at 64KB initial / 10MB max to handle large SSE
+// lines containing tool call outputs, code blocks, or base64-encoded content.
 func NewSSEReader(r io.Reader) *SSEReader {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 	return &SSEReader{
-		scanner: bufio.NewScanner(r),
+		scanner: scanner,
 	}
 }
 

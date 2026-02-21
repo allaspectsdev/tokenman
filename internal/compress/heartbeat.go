@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // heartbeatEntry holds a cached heartbeat response along with its expiry.

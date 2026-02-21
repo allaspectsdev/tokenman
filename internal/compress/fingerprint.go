@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // HashContent returns the SHA-256 hex digest of the given content string.

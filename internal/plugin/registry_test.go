@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // testPlugin is a minimal Plugin for testing.

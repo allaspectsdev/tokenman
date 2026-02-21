@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
-	"github.com/allaspects/tokenman/internal/tracing"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/tracing"
 )
 
 // UpstreamClient manages forwarding requests to upstream LLM API providers.

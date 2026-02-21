@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 func TestNewCollector_Defaults(t *testing.T) {

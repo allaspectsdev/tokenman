@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // DetectFormat inspects the request path and returns the corresponding API format.

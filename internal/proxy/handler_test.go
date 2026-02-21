@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/metrics"
-	"github.com/allaspects/tokenman/internal/pipeline"
-	"github.com/allaspects/tokenman/internal/security"
-	"github.com/allaspects/tokenman/internal/tokenizer"
+	"github.com/allaspectsdev/tokenman/internal/metrics"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/router"
+	"github.com/allaspectsdev/tokenman/internal/security"
+	"github.com/allaspectsdev/tokenman/internal/tokenizer"
 	"github.com/rs/zerolog"
 )
 
@@ -73,19 +74,25 @@ func (m *budgetExceededMiddleware) ProcessResponse(ctx context.Context, req *pip
 func newTestHandler(chain *pipeline.Chain, upstreamURL string) *ProxyHandler {
 	collector := metrics.NewCollector()
 	tok := tokenizer.New()
-	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, nil, RetryConfig{})
 
+	var rtr *router.Router
 	if upstreamURL != "" {
-		handler.SetProviders(map[string]ProviderConfig{
-			"test-model": {
-				BaseURL: upstreamURL,
-				APIKey:  "test-key",
-				Format:  pipeline.FormatAnthropic,
+		rtr = router.NewRouter(map[string]*router.ProviderConfig{
+			"test-provider": {
+				Name:     "test-provider",
+				BaseURL:  upstreamURL,
+				APIKey:   "test-key",
+				Format:   pipeline.FormatAnthropic,
+				Models:   []string{"test-model"},
+				Enabled:  true,
+				Priority: 1,
 			},
-		})
+		}, nil, "test-provider", false)
+	} else {
+		rtr = router.NewRouter(nil, nil, "", false)
 	}
 
-	return handler
+	return NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, nil, RetryConfig{}, rtr)
 }
 
 // newTestServer creates a chi-based Server with the given handler and returns
@@ -343,14 +350,15 @@ func TestRetry_SucceedsOnSecondAttempt(t *testing.T) {
 		MaxDelay:    10 * time.Millisecond,
 	}
 
-	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig)
-	handler.SetProviders(map[string]ProviderConfig{
-		"test-model": {
-			BaseURL: upstream.URL,
-			APIKey:  "test-key",
-			Format:  pipeline.FormatAnthropic,
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"test-provider": {
+			Name: "test-provider", BaseURL: upstream.URL, APIKey: "test-key",
+			Format: pipeline.FormatAnthropic, Models: []string{"test-model"},
+			Enabled: true, Priority: 1,
 		},
-	})
+	}, nil, "test-provider", false)
+
+	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig, rtr)
 
 	ts := newTestServer(handler)
 	defer ts.Close()
@@ -391,14 +399,15 @@ func TestRetry_Exhausted_Returns502(t *testing.T) {
 		MaxDelay:    10 * time.Millisecond,
 	}
 
-	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig)
-	handler.SetProviders(map[string]ProviderConfig{
-		"test-model": {
-			BaseURL: upstream.URL,
-			APIKey:  "test-key",
-			Format:  pipeline.FormatAnthropic,
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"test-provider": {
+			Name: "test-provider", BaseURL: upstream.URL, APIKey: "test-key",
+			Format: pipeline.FormatAnthropic, Models: []string{"test-model"},
+			Enabled: true, Priority: 1,
 		},
-	})
+	}, nil, "test-provider", false)
+
+	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig, rtr)
 
 	ts := newTestServer(handler)
 	defer ts.Close()
@@ -458,6 +467,71 @@ func TestReadinessProbe_Returns503WhenNoProviders(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, http.StatusServiceUnavailable, string(body))
+	}
+}
+
+// --- Rate limit exceeded middleware ---
+
+type rateLimitExceededMiddleware struct{}
+
+func (m *rateLimitExceededMiddleware) Name() string  { return "test-ratelimit" }
+func (m *rateLimitExceededMiddleware) Enabled() bool { return true }
+
+func (m *rateLimitExceededMiddleware) ProcessRequest(ctx context.Context, req *pipeline.Request) (*pipeline.Request, error) {
+	return nil, &security.RateLimitError{
+		Provider:   "anthropic",
+		Rate:       10.0,
+		RetryAfter: 1.0,
+		Message:    "rate_limited: provider \"anthropic\" has exceeded its rate limit of 10.0 req/s",
+	}
+}
+
+func (m *rateLimitExceededMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Request, resp *pipeline.Response) (*pipeline.Response, error) {
+	return resp, nil
+}
+
+func TestRateLimitExceeded_Returns429(t *testing.T) {
+	chain := pipeline.NewChain(&rateLimitExceededMiddleware{})
+	handler := newTestHandler(chain, "")
+	ts := newTestServer(handler)
+	defer ts.Close()
+
+	reqBody := `{"model":"test-model","messages":[{"role":"user","content":"hello"}],"max_tokens":100}`
+	resp, err := http.Post(ts.URL+"/v1/messages", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("POST /v1/messages failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, http.StatusTooManyRequests, string(body))
+	}
+
+	// Verify Retry-After header.
+	if ra := resp.Header.Get("Retry-After"); ra != "1" {
+		t.Errorf("Retry-After = %q; want %q", ra, "1")
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading response body: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("unmarshalling response %q: %v", string(body), err)
+	}
+
+	errorObj, ok := result["error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected error object in response; got %v", result)
+	}
+	if errorObj["type"] != "rate_limit_error" {
+		t.Errorf("error.type = %v; want %q", errorObj["type"], "rate_limit_error")
+	}
+	if errorObj["provider"] != "anthropic" {
+		t.Errorf("error.provider = %v; want %q", errorObj["provider"], "anthropic")
 	}
 }
 

@@ -3,7 +3,7 @@ package router
 import (
 	"time"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // ProviderConfig holds the configuration for an upstream LLM provider.

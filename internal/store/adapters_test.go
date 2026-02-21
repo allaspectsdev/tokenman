@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/cache"
+	"github.com/allaspectsdev/tokenman/internal/cache"
 )
 
 // openTestStore creates a temporary SQLite-backed Store for testing.

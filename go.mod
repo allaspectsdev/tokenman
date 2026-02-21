@@ -1,4 +1,4 @@
-module github.com/allaspects/tokenman
+module github.com/allaspectsdev/tokenman
 
 go 1.25.0
 

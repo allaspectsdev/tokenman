@@ -8,16 +8,16 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/compress"
-	"github.com/allaspects/tokenman/internal/metrics"
-	"github.com/allaspects/tokenman/internal/pipeline"
-	"github.com/allaspects/tokenman/internal/security"
-	"github.com/allaspects/tokenman/internal/store"
-	"github.com/allaspects/tokenman/internal/tokenizer"
-	"github.com/allaspects/tokenman/internal/tracing"
+	"github.com/allaspectsdev/tokenman/internal/compress"
+	"github.com/allaspectsdev/tokenman/internal/metrics"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/router"
+	"github.com/allaspectsdev/tokenman/internal/security"
+	"github.com/allaspectsdev/tokenman/internal/store"
+	"github.com/allaspectsdev/tokenman/internal/tokenizer"
+	"github.com/allaspectsdev/tokenman/internal/tracing"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -49,8 +49,7 @@ type ProxyHandler struct {
 	chain           *pipeline.Chain
 	client          *UpstreamClient
 	logger          zerolog.Logger
-	providersMu     sync.RWMutex
-	providers       map[string]ProviderConfig
+	router          *router.Router
 	collector       *metrics.Collector
 	tokenizer       *tokenizer.Tokenizer
 	store           *store.Store
@@ -79,12 +78,13 @@ func NewProxyHandler(
 	streamTimeout time.Duration,
 	cbRegistry *CircuitBreakerRegistry,
 	retryConfig RetryConfig,
+	rtr *router.Router,
 ) *ProxyHandler {
 	return &ProxyHandler{
 		chain:           chain,
 		client:          client,
 		logger:          logger,
-		providers:       make(map[string]ProviderConfig),
+		router:          rtr,
 		collector:       collector,
 		tokenizer:       tok,
 		store:           st,
@@ -97,95 +97,24 @@ func NewProxyHandler(
 	}
 }
 
-// SetProviders configures the model-to-provider mapping. It is safe to call
-// concurrently with request handling.
-func (h *ProxyHandler) SetProviders(providers map[string]ProviderConfig) {
-	h.providersMu.Lock()
-	h.providers = providers
-	h.providersMu.Unlock()
-}
-
-// snapshotProviders returns a shallow copy of the providers map under a read lock.
-func (h *ProxyHandler) snapshotProviders() map[string]ProviderConfig {
-	h.providersMu.RLock()
-	cp := make(map[string]ProviderConfig, len(h.providers))
-	for k, v := range h.providers {
-		cp[k] = v
-	}
-	h.providersMu.RUnlock()
-	return cp
-}
-
-// resolveProvider looks up the provider configuration for the given model name.
-// It returns the base URL, API key, format, and an error if no provider is found.
-func (h *ProxyHandler) resolveProvider(model string) (baseURL, apiKey string, format pipeline.APIFormat, err error) {
-	h.providersMu.RLock()
-	defer h.providersMu.RUnlock()
-
-	if p, ok := h.providers[model]; ok {
-		return p.BaseURL, p.APIKey, p.Format, nil
-	}
-
-	// Try prefix matching for versioned model names (e.g., "claude-sonnet-4-20250514" matching "claude-sonnet-4").
-	for key, p := range h.providers {
-		if len(model) > len(key) && model[:len(key)] == key {
-			return p.BaseURL, p.APIKey, p.Format, nil
-		}
-	}
-
-	return "", "", pipeline.FormatUnknown, fmt.Errorf("no provider configured for model %q", model)
-}
 
 // forwardWithRetry attempts to forward the request using the retry/circuit-breaker
-// logic. It iterates through all configured providers, checking circuit breaker
-// state, and retries on transient failures with exponential backoff.
+// logic. It uses the router to resolve providers with deterministic fallback
+// ordering by priority, and retries on transient failures with exponential backoff.
 func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.Request, logger zerolog.Logger) (*http.Response, error) {
-	// Snapshot providers under read lock to avoid holding the lock during retries.
-	providers := h.snapshotProviders()
-
-	// Build a list of candidate providers. Start with the exact match, then
-	// try all others as fallbacks.
-	type candidate struct {
-		name   string
-		config ProviderConfig
-	}
-	var candidates []candidate
-
-	// Try exact match first.
-	if p, ok := providers[pipeReq.Model]; ok {
-		candidates = append(candidates, candidate{name: pipeReq.Model, config: p})
-	}
-
-	// Add prefix matches and other providers as fallbacks.
-	for key, p := range providers {
-		if key == pipeReq.Model {
-			continue // already added
-		}
-		// Include prefix matches and all other providers as potential fallbacks.
-		if len(pipeReq.Model) > len(key) && pipeReq.Model[:len(key)] == key {
-			candidates = append(candidates, candidate{name: key, config: p})
-		}
-	}
-
-	// If no candidates found at all, try all providers.
-	if len(candidates) == 0 {
-		for key, p := range providers {
-			candidates = append(candidates, candidate{name: key, config: p})
-		}
-	}
-
-	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no provider configured for model %q", pipeReq.Model)
+	candidates, err := h.router.ResolveWithFallback(pipeReq.Model)
+	if err != nil {
+		return nil, fmt.Errorf("no provider for model %q: %w", pipeReq.Model, err)
 	}
 
 	var lastErr error
 	for _, cand := range candidates {
-		cb := h.cbRegistry.Get(cand.name)
+		cb := h.cbRegistry.Get(cand.Name)
 		if !cb.Allow() {
-			logger.Debug().Str("provider", cand.name).Msg("circuit breaker open, skipping provider")
+			logger.Debug().Str("provider", cand.Name).Msg("circuit breaker open, skipping provider")
 			if h.collector != nil {
-				h.collector.RecordProviderRequest(cand.name, "circuit_open")
-				h.collector.SetCircuitState(cand.name, float64(cb.State()))
+				h.collector.RecordProviderRequest(cand.Name, "circuit_open")
+				h.collector.SetCircuitState(cand.Name, float64(cb.State()))
 			}
 			continue
 		}
@@ -198,15 +127,23 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 				}
 			}
 
-			resp, err := h.client.Forward(ctx, pipeReq, cand.config.BaseURL, cand.config.APIKey)
+			// Apply per-provider timeout via context for non-streaming requests.
+			fwdCtx := ctx
+			if cand.Timeout > 0 && !pipeReq.Stream {
+				var cancel context.CancelFunc
+				fwdCtx, cancel = context.WithTimeout(ctx, cand.Timeout)
+				defer cancel()
+			}
+
+			resp, err := h.client.Forward(fwdCtx, pipeReq, cand.BaseURL, cand.APIKey)
 			if err != nil {
 				lastErr = err
 				cb.RecordFailure()
 				if h.collector != nil {
-					h.collector.RecordProviderRequest(cand.name, "error")
-					h.collector.SetCircuitState(cand.name, float64(cb.State()))
+					h.collector.RecordProviderRequest(cand.Name, "error")
+					h.collector.SetCircuitState(cand.Name, float64(cb.State()))
 				}
-				logger.Warn().Err(err).Str("provider", cand.name).Int("attempt", attempt+1).Msg("upstream forward error, retrying")
+				logger.Warn().Err(err).Str("provider", cand.Name).Int("attempt", attempt+1).Msg("upstream forward error, retrying")
 				continue
 			}
 
@@ -216,8 +153,8 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 				if pipeReq.Stream {
 					cb.RecordFailure()
 					if h.collector != nil {
-						h.collector.RecordProviderRequest(cand.name, "error")
-						h.collector.SetCircuitState(cand.name, float64(cb.State()))
+						h.collector.RecordProviderRequest(cand.Name, "error")
+						h.collector.SetCircuitState(cand.Name, float64(cb.State()))
 					}
 					return resp, nil // return the error response; caller handles it
 				}
@@ -225,8 +162,8 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 				lastErr = fmt.Errorf("upstream returned status %d", resp.StatusCode)
 				cb.RecordFailure()
 				if h.collector != nil {
-					h.collector.RecordProviderRequest(cand.name, "error")
-					h.collector.SetCircuitState(cand.name, float64(cb.State()))
+					h.collector.RecordProviderRequest(cand.Name, "error")
+					h.collector.SetCircuitState(cand.Name, float64(cb.State()))
 				}
 
 				// Respect Retry-After header if present.
@@ -239,15 +176,15 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 					_ = resp.Body.Close()
 				}
 
-				logger.Warn().Int("status", resp.StatusCode).Str("provider", cand.name).Int("attempt", attempt+1).Msg("retryable upstream status")
+				logger.Warn().Int("status", resp.StatusCode).Str("provider", cand.Name).Int("attempt", attempt+1).Msg("retryable upstream status")
 				continue
 			}
 
 			// Non-retryable response (success or non-transient error).
 			cb.RecordSuccess()
 			if h.collector != nil {
-				h.collector.RecordProviderRequest(cand.name, "success")
-				h.collector.SetCircuitState(cand.name, float64(cb.State()))
+				h.collector.RecordProviderRequest(cand.Name, "success")
+				h.collector.SetCircuitState(cand.Name, float64(cb.State()))
 			}
 			return resp, nil
 		}
@@ -391,6 +328,19 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(budgetErr.ToJSON())
 			return
 		}
+		// Check for rate limit exceeded error -> return 429.
+		var rateLimitErr *security.RateLimitError
+		if errors.As(err, &rateLimitErr) {
+			logger.Warn().Str("provider", rateLimitErr.Provider).Float64("rate", rateLimitErr.Rate).Msg("rate limit exceeded")
+			if h.collector != nil {
+				h.collector.RecordError("ratelimit", rateLimitErr.Provider, http.StatusTooManyRequests)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", rateLimitErr.RetryAfter))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write(rateLimitErr.ToJSON())
+			return
+		}
 		logger.Error().Err(err).Msg("pipeline request processing failed")
 		if h.collector != nil {
 			h.collector.RecordError("pipeline", "", http.StatusInternalServerError)
@@ -451,10 +401,17 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	if h.cbRegistry != nil && h.retryConfig.MaxAttempts > 0 {
 		upstreamResp, err = h.forwardWithRetry(ctx, pipeReq, logger)
 	} else {
-		var baseURL, apiKey string
-		baseURL, apiKey, _, err = h.resolveProvider(pipeReq.Model)
-		if err == nil {
-			upstreamResp, err = h.client.Forward(ctx, pipeReq, baseURL, apiKey)
+		provider, resolveErr := h.router.Resolve(pipeReq.Model)
+		if resolveErr != nil {
+			err = resolveErr
+		} else {
+			fwdCtx := ctx
+			if provider.Timeout > 0 && !pipeReq.Stream {
+				var cancel context.CancelFunc
+				fwdCtx, cancel = context.WithTimeout(ctx, provider.Timeout)
+				defer cancel()
+			}
+			upstreamResp, err = h.client.Forward(fwdCtx, pipeReq, provider.BaseURL, provider.APIKey)
 		}
 	}
 
@@ -756,10 +713,7 @@ func (h *ProxyHandler) HandleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check provider availability.
-	h.providersMu.RLock()
-	providerCount := len(h.providers)
-	h.providersMu.RUnlock()
-	if providerCount > 0 {
+	if len(h.router.ListModels()) > 0 {
 		checks = append(checks, checkResult{Name: "providers", Status: "ok"})
 	} else {
 		checks = append(checks, checkResult{Name: "providers", Status: "fail", Error: "no providers configured"})
@@ -789,26 +743,24 @@ func (h *ProxyHandler) HandleModels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := h.logger.With().Str("path", r.URL.Path).Logger()
 
-	// Find any configured provider to forward the models request to.
-	var baseURL, apiKey string
-	var format pipeline.APIFormat
-	var found bool
-
-	h.providersMu.RLock()
-	for _, p := range h.providers {
-		baseURL = p.BaseURL
-		apiKey = p.APIKey
-		format = p.Format
-		found = true
-		break
+	// Use the router's default provider for the models endpoint.
+	provider, resolveErr := h.router.Resolve("")
+	if resolveErr != nil {
+		// No default provider; try the first available model.
+		models := h.router.ListModels()
+		if len(models) > 0 {
+			provider, resolveErr = h.router.Resolve(models[0])
+		}
 	}
-	h.providersMu.RUnlock()
-
-	if !found {
+	if resolveErr != nil || provider == nil {
 		logger.Warn().Msg("no providers configured for models endpoint")
 		writeJSONError(w, http.StatusBadGateway, "no providers configured")
 		return
 	}
+
+	baseURL := provider.BaseURL
+	apiKey := provider.APIKey
+	format := provider.Format
 
 	// Build the upstream URL for the models endpoint.
 	var upstreamURL string

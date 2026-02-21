@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	cachepkg "github.com/allaspects/tokenman/internal/cache"
+	cachepkg "github.com/allaspectsdev/tokenman/internal/cache"
 )
 
 // FingerprintAdapter adapts Store to compress.FingerprintStore interface.

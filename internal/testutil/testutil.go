@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/allaspects/tokenman/internal/config"
-	"github.com/allaspects/tokenman/internal/store"
+	"github.com/allaspectsdev/tokenman/internal/config"
+	"github.com/allaspectsdev/tokenman/internal/store"
 )
 
 // NewTestStore creates an in-memory SQLite store for testing.

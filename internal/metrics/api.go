@@ -15,9 +15,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
 
-	"github.com/allaspects/tokenman/internal/config"
-	"github.com/allaspects/tokenman/internal/store"
-	"github.com/allaspects/tokenman/web"
+	"github.com/allaspectsdev/tokenman/internal/config"
+	"github.com/allaspectsdev/tokenman/internal/store"
+	"github.com/allaspectsdev/tokenman/web"
 )
 
 // DashboardServer serves the web dashboard and JSON API endpoints for

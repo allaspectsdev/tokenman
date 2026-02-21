@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/tracing"
+	"github.com/allaspectsdev/tokenman/internal/tracing"
 )
 
 // recoverMiddleware runs fn inside a deferred recover so that a panicking

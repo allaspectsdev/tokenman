@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // ---------------------------------------------------------------------------

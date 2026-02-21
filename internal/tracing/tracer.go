@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const tracerName = "github.com/allaspects/tokenman"
+const tracerName = "github.com/allaspectsdev/tokenman"
 
 // Tracer returns the global tracer for TokenMan instrumentation.
 func Tracer() trace.Tracer {

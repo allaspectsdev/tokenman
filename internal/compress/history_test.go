@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 func TestHistoryMiddleware_NoCompressionWithinWindow(t *testing.T) {

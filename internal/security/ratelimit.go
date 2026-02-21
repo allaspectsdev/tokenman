@@ -2,13 +2,43 @@ package security
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/config"
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/config"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
+
+// RateLimitError is returned when a provider's rate limit is exceeded. It carries
+// structured data that the HTTP handler can serialize to a JSON response with
+// HTTP 429 status.
+type RateLimitError struct {
+	Provider   string  `json:"provider"`
+	Rate       float64 `json:"rate"`
+	RetryAfter float64 `json:"retry_after"`
+	Message    string  `json:"message"`
+}
+
+// Error implements the error interface.
+func (e *RateLimitError) Error() string {
+	return e.Message
+}
+
+// ToJSON serializes the rate limit error to a JSON body suitable for an HTTP response.
+func (e *RateLimitError) ToJSON() []byte {
+	body := map[string]interface{}{
+		"error": map[string]interface{}{
+			"type":        "rate_limit_error",
+			"message":     e.Message,
+			"provider":    e.Provider,
+			"retry_after": e.RetryAfter,
+		},
+	}
+	data, _ := json.Marshal(body)
+	return data
+}
 
 // tokenBucket implements a token-bucket rate limiter for a single provider.
 type tokenBucket struct {
@@ -106,7 +136,12 @@ func (rl *RateLimitMiddleware) ProcessRequest(ctx context.Context, req *pipeline
 		if retryAfter < 0.1 {
 			retryAfter = 0.1
 		}
-		return nil, fmt.Errorf("rate_limited: provider %q has exceeded its rate limit of %.1f req/s; retry after %.2fs", provider, bucket.rate, retryAfter)
+		return nil, &RateLimitError{
+			Provider:   provider,
+			Rate:       bucket.rate,
+			RetryAfter: retryAfter,
+			Message:    fmt.Sprintf("rate_limited: provider %q has exceeded its rate limit of %.1f req/s", provider, bucket.rate),
+		}
 	}
 
 	return req, nil

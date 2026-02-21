@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 func TestIsHeartbeat_SystemPromptAndFewUserMessages(t *testing.T) {

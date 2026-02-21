@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/allaspects/tokenman/internal/version"
+	"github.com/allaspectsdev/tokenman/internal/version"
 )
 
 func main() {

@@ -144,16 +144,16 @@ func (h *ProxyHandler) HandleStreamCreate(w http.ResponseWriter, r *http.Request
 	}
 
 	// Resolve provider for the model.
-	baseURL, apiKey, format, err := h.resolveProvider(req.Model)
+	pc, err := h.router.Resolve(req.Model)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("no provider for model: %s", req.Model))
 		return
 	}
 
 	provider := ProviderConfig{
-		BaseURL: baseURL,
-		APIKey:  apiKey,
-		Format:  format,
+		BaseURL: pc.BaseURL,
+		APIKey:  pc.APIKey,
+		Format:  pc.Format,
 	}
 
 	session := h.streams.Create(req.Model, provider)

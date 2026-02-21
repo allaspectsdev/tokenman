@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // BudgetStore is the persistence interface for budget tracking.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // RulesConfig controls which text-compression rules are applied.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/allaspects/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
 // mockFlusher wraps httptest.ResponseRecorder and satisfies http.Flusher.

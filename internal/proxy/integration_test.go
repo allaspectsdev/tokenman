@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/allaspects/tokenman/internal/metrics"
-	"github.com/allaspects/tokenman/internal/pipeline"
-	"github.com/allaspects/tokenman/internal/store"
-	"github.com/allaspects/tokenman/internal/tokenizer"
+	"github.com/allaspectsdev/tokenman/internal/metrics"
+	"github.com/allaspectsdev/tokenman/internal/pipeline"
+	"github.com/allaspectsdev/tokenman/internal/router"
+	"github.com/allaspectsdev/tokenman/internal/store"
+	"github.com/allaspectsdev/tokenman/internal/tokenizer"
 	"github.com/rs/zerolog"
 )
 
@@ -38,6 +39,27 @@ func setupIntegration(t *testing.T, upstreamHandler http.HandlerFunc) (*Server, 
 
 	chain := pipeline.NewChain() // empty chain for integration tests
 
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"anthropic": {
+			Name:    "anthropic",
+			BaseURL: upstream.URL,
+			APIKey:  "test-key",
+			Format:  pipeline.FormatAnthropic,
+			Models:  []string{"claude-sonnet-4-20250514"},
+			Enabled: true,
+			Priority: 1,
+		},
+		"openai": {
+			Name:    "openai",
+			BaseURL: upstream.URL,
+			APIKey:  "test-key",
+			Format:  pipeline.FormatOpenAI,
+			Models:  []string{"gpt-4o"},
+			Enabled: true,
+			Priority: 2,
+		},
+	}, nil, "anthropic", false)
+
 	handler := NewProxyHandler(
 		chain,
 		NewUpstreamClient(),
@@ -50,20 +72,8 @@ func setupIntegration(t *testing.T, upstreamHandler http.HandlerFunc) (*Server, 
 		0,      // no stream timeout
 		nil,    // no circuit breaker
 		RetryConfig{},
+		rtr,
 	)
-
-	handler.SetProviders(map[string]ProviderConfig{
-		"claude-sonnet-4-20250514": {
-			BaseURL: upstream.URL,
-			APIKey:  "test-key",
-			Format:  pipeline.FormatAnthropic,
-		},
-		"gpt-4o": {
-			BaseURL: upstream.URL,
-			APIKey:  "test-key",
-			Format:  pipeline.FormatOpenAI,
-		},
-	})
 
 	srv := NewServer(handler, ":0", 0, 0, 0, false)
 	return srv, upstream
@@ -371,11 +381,16 @@ func TestIntegration_RequestPersistence(t *testing.T) {
 	logger := zerolog.Nop()
 	chain := pipeline.NewChain()
 
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"anthropic": {
+			Name: "anthropic", BaseURL: upstream.URL, APIKey: "test-key",
+			Format: pipeline.FormatAnthropic, Models: []string{"claude-sonnet-4-20250514"},
+			Enabled: true, Priority: 1,
+		},
+	}, nil, "anthropic", false)
+
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, st,
-		10<<20, 0, 0, nil, RetryConfig{})
-	handler.SetProviders(map[string]ProviderConfig{
-		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
-	})
+		10<<20, 0, 0, nil, RetryConfig{}, rtr)
 
 	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
@@ -420,11 +435,16 @@ func TestIntegration_ProjectHeader(t *testing.T) {
 	logger := zerolog.Nop()
 	chain := pipeline.NewChain()
 
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"anthropic": {
+			Name: "anthropic", BaseURL: upstream.URL, APIKey: "test-key",
+			Format: pipeline.FormatAnthropic, Models: []string{"claude-sonnet-4-20250514"},
+			Enabled: true, Priority: 1,
+		},
+	}, nil, "anthropic", false)
+
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, st,
-		10<<20, 0, 0, nil, RetryConfig{})
-	handler.SetProviders(map[string]ProviderConfig{
-		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
-	})
+		10<<20, 0, 0, nil, RetryConfig{}, rtr)
 	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hi"}],"max_tokens":100,"stream":false}`
@@ -464,12 +484,17 @@ func TestIntegration_MaxBodySize(t *testing.T) {
 	logger := zerolog.Nop()
 	chain := pipeline.NewChain()
 
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"anthropic": {
+			Name: "anthropic", BaseURL: upstream.URL, APIKey: "test-key",
+			Format: pipeline.FormatAnthropic, Models: []string{"claude-sonnet-4-20250514"},
+			Enabled: true, Priority: 1,
+		},
+	}, nil, "anthropic", false)
+
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, nil,
 		100, // 100 byte max body size
-		0, 0, nil, RetryConfig{})
-	handler.SetProviders(map[string]ProviderConfig{
-		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
-	})
+		0, 0, nil, RetryConfig{}, rtr)
 	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
 	// Build a body larger than 100 bytes.
@@ -498,13 +523,18 @@ func TestIntegration_ResponseSizeLimit(t *testing.T) {
 	logger := zerolog.Nop()
 	chain := pipeline.NewChain()
 
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"anthropic": {
+			Name: "anthropic", BaseURL: upstream.URL, APIKey: "test-key",
+			Format: pipeline.FormatAnthropic, Models: []string{"claude-sonnet-4-20250514"},
+			Enabled: true, Priority: 1,
+		},
+	}, nil, "anthropic", false)
+
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, nil,
 		10<<20,
 		100, // 100 byte max response size
-		0, nil, RetryConfig{})
-	handler.SetProviders(map[string]ProviderConfig{
-		"claude-sonnet-4-20250514": {BaseURL: upstream.URL, APIKey: "test-key", Format: pipeline.FormatAnthropic},
-	})
+		0, nil, RetryConfig{}, rtr)
 	srv := NewServer(handler, ":0", 0, 0, 0, false)
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hi"}],"max_tokens":100,"stream":false}`
@@ -559,6 +589,18 @@ func setupIntegrationWithRetry(t *testing.T, upstreamHandler http.HandlerFunc) (
 
 	cbRegistry := NewCircuitBreakerRegistry(3, 10*time.Second, 1) // low threshold for testing
 
+	rtr := router.NewRouter(map[string]*router.ProviderConfig{
+		"anthropic": {
+			Name:    "anthropic",
+			BaseURL: upstream.URL,
+			APIKey:  "test-key",
+			Format:  pipeline.FormatAnthropic,
+			Models:  []string{"claude-sonnet-4-20250514"},
+			Enabled: true,
+			Priority: 1,
+		},
+	}, nil, "anthropic", false)
+
 	handler := NewProxyHandler(
 		chain,
 		NewUpstreamClient(),
@@ -575,15 +617,8 @@ func setupIntegrationWithRetry(t *testing.T, upstreamHandler http.HandlerFunc) (
 			BaseDelay:   1 * time.Millisecond, // fast retries for testing
 			MaxDelay:    10 * time.Millisecond,
 		},
+		rtr,
 	)
-
-	handler.SetProviders(map[string]ProviderConfig{
-		"claude-sonnet-4-20250514": {
-			BaseURL: upstream.URL,
-			APIKey:  "test-key",
-			Format:  pipeline.FormatAnthropic,
-		},
-	})
 
 	srv := NewServer(handler, ":0", 0, 0, 0, false)
 	return srv, upstream

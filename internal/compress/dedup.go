@@ -86,10 +86,13 @@ func (d *DedupMiddleware) ProcessRequest(_ context.Context, req *pipeline.Reques
 		if d.seenWithinTTL(hash) {
 			cacheEligible += tokenCount
 			if req.Format == pipeline.FormatAnthropic {
+				// Only add cache_control if the block doesn't already have
+				// one set by the client, to avoid breaking TTL ordering.
 				if req.SystemBlocks[i].CacheControl == nil {
-					req.SystemBlocks[i].CacheControl = make(map[string]interface{})
+					req.SystemBlocks[i].CacheControl = map[string]interface{}{
+						"type": "ephemeral",
+					}
 				}
-				req.SystemBlocks[i].CacheControl["type"] = "ephemeral"
 			}
 		}
 	}
@@ -173,12 +176,15 @@ func annotateCacheControl(blocks []pipeline.ContentBlock, systemText string) []p
 	}
 
 	// Annotate the last text block for maximum prefix-cache coverage.
+	// Only add cache_control if the block doesn't already have one from
+	// the client, to avoid breaking TTL ordering constraints.
 	for i := len(blocks) - 1; i >= 0; i-- {
 		if blocks[i].Type == "text" {
 			if blocks[i].CacheControl == nil {
-				blocks[i].CacheControl = make(map[string]interface{})
+				blocks[i].CacheControl = map[string]interface{}{
+					"type": "ephemeral",
+				}
 			}
-			blocks[i].CacheControl["type"] = "ephemeral"
 			break
 		}
 	}

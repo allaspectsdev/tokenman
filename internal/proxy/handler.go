@@ -905,6 +905,7 @@ func rebuildAnthropicBody(req *pipeline.Request) []byte {
 		body["temperature"] = *req.Temperature
 	}
 	if len(req.SystemBlocks) > 0 {
+		sanitizeCacheControlTTLs(req.SystemBlocks)
 		body["system"] = req.SystemBlocks
 	} else if req.System != "" {
 		body["system"] = req.System
@@ -959,4 +960,38 @@ func rebuildOpenAIBody(req *pipeline.Request) []byte {
 		return req.RawBody
 	}
 	return data
+}
+
+// sanitizeCacheControlTTLs ensures cache_control TTL values on content blocks
+// are in non-increasing order, as required by the Anthropic API. The API
+// enforces that longer TTLs ("1h") must appear before shorter ones ("5m").
+// When violations are found, earlier blocks are upgraded to match.
+func sanitizeCacheControlTTLs(blocks []pipeline.ContentBlock) {
+	ttlMins := func(cc map[string]interface{}) int {
+		if cc == nil {
+			return -1 // no cache_control
+		}
+		if t, ok := cc["ttl"].(string); ok && t == "1h" {
+			return 60
+		}
+		return 5 // default when cache_control present but no ttl
+	}
+
+	// Scan right-to-left: if a later block has a higher TTL, upgrade earlier
+	// blocks to match so the sequence is non-increasing.
+	maxFromRight := 0
+	for i := len(blocks) - 1; i >= 0; i-- {
+		m := ttlMins(blocks[i].CacheControl)
+		if m < 0 {
+			continue // no cache_control on this block
+		}
+		if m > maxFromRight {
+			maxFromRight = m
+		} else if m < maxFromRight {
+			// Earlier block has a lower TTL than a later block — upgrade it.
+			if maxFromRight >= 60 {
+				blocks[i].CacheControl["ttl"] = "1h"
+			}
+		}
+	}
 }

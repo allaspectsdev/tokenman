@@ -8,21 +8,22 @@ import (
 	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
-// CacheKey computes a deterministic SHA-256 cache key from the model name,
-// messages, and tools. The key is hex-encoded.
-func CacheKey(model string, messages []pipeline.Message, tools []pipeline.Tool) string {
+// CacheKey computes a deterministic SHA-256 cache key from the request's
+// model, messages, tools, system prompt, system blocks, and max_tokens.
+// The key is hex-encoded.
+func CacheKey(req *pipeline.Request) string {
 	h := sha256.New()
 
 	// Write model.
-	h.Write([]byte(model))
+	h.Write([]byte(req.Model))
 	h.Write([]byte{0}) // separator
 
 	// Write messages as canonical JSON.
-	if len(messages) > 0 {
-		msgBytes, err := json.Marshal(messages)
+	if len(req.Messages) > 0 {
+		msgBytes, err := json.Marshal(req.Messages)
 		if err != nil {
 			// Fall back to writing individual fields.
-			for _, m := range messages {
+			for _, m := range req.Messages {
 				h.Write([]byte(m.Role))
 				h.Write([]byte{0})
 				if s, ok := m.Content.(string); ok {
@@ -40,12 +41,29 @@ func CacheKey(model string, messages []pipeline.Message, tools []pipeline.Tool) 
 	h.Write([]byte{0}) // separator
 
 	// Write tools as canonical JSON.
-	if len(tools) > 0 {
-		toolBytes, err := json.Marshal(tools)
+	if len(req.Tools) > 0 {
+		toolBytes, err := json.Marshal(req.Tools)
 		if err == nil {
 			h.Write(toolBytes)
 		}
 	}
+	h.Write([]byte{0}) // separator
+
+	// Write system prompt.
+	h.Write([]byte(req.System))
+	h.Write([]byte{0}) // separator
+
+	// Write system blocks as canonical JSON.
+	if len(req.SystemBlocks) > 0 {
+		sysBytes, err := json.Marshal(req.SystemBlocks)
+		if err == nil {
+			h.Write(sysBytes)
+		}
+	}
+	h.Write([]byte{0}) // separator
+
+	// Write max_tokens.
+	fmt.Fprintf(h, "%d", req.MaxTokens)
 
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

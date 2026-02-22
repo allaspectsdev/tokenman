@@ -92,7 +92,7 @@ func (c *CacheMiddleware) ProcessRequest(ctx context.Context, req *pipeline.Requ
 		return req, nil
 	}
 
-	key := CacheKey(req.Model, req.Messages, req.Tools)
+	key := CacheKey(req)
 
 	// Store the key in metadata for use in ProcessResponse.
 	if req.Metadata == nil {
@@ -173,7 +173,7 @@ func (c *CacheMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Req
 		}
 	}
 	if key == "" {
-		key = CacheKey(req.Model, req.Messages, req.Tools)
+		key = CacheKey(req)
 	}
 
 	now := time.Now()

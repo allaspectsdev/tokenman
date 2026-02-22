@@ -116,6 +116,24 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	// Rate limit validation
+	if cfg.Security.RateLimit.Enabled {
+		if cfg.Security.RateLimit.DefaultRate <= 0 {
+			errs = append(errs, fmt.Sprintf("security.rate_limit.default_rate must be positive, got %f", cfg.Security.RateLimit.DefaultRate))
+		}
+		if cfg.Security.RateLimit.DefaultBurst < 1 {
+			errs = append(errs, fmt.Sprintf("security.rate_limit.default_burst must be at least 1, got %d", cfg.Security.RateLimit.DefaultBurst))
+		}
+		for name, pl := range cfg.Security.RateLimit.ProviderLimits {
+			if pl.Rate <= 0 {
+				errs = append(errs, fmt.Sprintf("security.rate_limit.provider_limits[%q].rate must be positive, got %f", name, pl.Rate))
+			}
+			if pl.Burst < 1 {
+				errs = append(errs, fmt.Sprintf("security.rate_limit.provider_limits[%q].burst must be at least 1, got %d", name, pl.Burst))
+			}
+		}
+	}
+
 	// Resilience validation
 	if cfg.Resilience.RetryMaxAttempts < 0 {
 		errs = append(errs, fmt.Sprintf("resilience.retry_max_attempts must be non-negative, got %d", cfg.Resilience.RetryMaxAttempts))

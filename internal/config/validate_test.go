@@ -297,6 +297,84 @@ func TestValidate_MultipleErrors(t *testing.T) {
 	}
 }
 
+func TestValidate_RateLimit_ZeroDefaultRate(t *testing.T) {
+	cfg := validConfig()
+	cfg.Security.RateLimit.Enabled = true
+	cfg.Security.RateLimit.DefaultRate = 0
+	cfg.Security.RateLimit.DefaultBurst = 10
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for zero default_rate")
+	}
+	if !strings.Contains(err.Error(), "default_rate") {
+		t.Errorf("error should mention default_rate: %v", err)
+	}
+}
+
+func TestValidate_RateLimit_ZeroDefaultBurst(t *testing.T) {
+	cfg := validConfig()
+	cfg.Security.RateLimit.Enabled = true
+	cfg.Security.RateLimit.DefaultRate = 10.0
+	cfg.Security.RateLimit.DefaultBurst = 0
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for zero default_burst")
+	}
+	if !strings.Contains(err.Error(), "default_burst") {
+		t.Errorf("error should mention default_burst: %v", err)
+	}
+}
+
+func TestValidate_RateLimit_NegativeProviderRate(t *testing.T) {
+	cfg := validConfig()
+	cfg.Security.RateLimit.Enabled = true
+	cfg.Security.RateLimit.DefaultRate = 10.0
+	cfg.Security.RateLimit.DefaultBurst = 20
+	cfg.Security.RateLimit.ProviderLimits = map[string]ProviderRateLimit{
+		"anthropic": {Rate: -1.0, Burst: 10},
+	}
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for negative provider rate")
+	}
+	if !strings.Contains(err.Error(), "provider_limits") {
+		t.Errorf("error should mention provider_limits: %v", err)
+	}
+}
+
+func TestValidate_RateLimit_ZeroProviderBurst(t *testing.T) {
+	cfg := validConfig()
+	cfg.Security.RateLimit.Enabled = true
+	cfg.Security.RateLimit.DefaultRate = 10.0
+	cfg.Security.RateLimit.DefaultBurst = 20
+	cfg.Security.RateLimit.ProviderLimits = map[string]ProviderRateLimit{
+		"openai": {Rate: 5.0, Burst: 0},
+	}
+
+	err := validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for zero provider burst")
+	}
+	if !strings.Contains(err.Error(), "provider_limits") {
+		t.Errorf("error should mention provider_limits: %v", err)
+	}
+}
+
+func TestValidate_RateLimit_DisabledSkipsValidation(t *testing.T) {
+	cfg := validConfig()
+	cfg.Security.RateLimit.Enabled = false
+	cfg.Security.RateLimit.DefaultRate = 0
+	cfg.Security.RateLimit.DefaultBurst = 0
+
+	err := validate(cfg)
+	if err != nil {
+		t.Fatalf("expected no error when rate limit disabled: %v", err)
+	}
+}
+
 func TestIsValidEnum(t *testing.T) {
 	if !isValidEnum("INFO", ValidLogLevels) {
 		t.Error("INFO should be valid (case-insensitive)")

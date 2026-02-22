@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"time"
 )
@@ -25,6 +26,8 @@ type Message struct {
 }
 
 // ContentBlock represents a content block (for multi-part messages).
+// The Extra field captures unknown JSON fields (e.g. OpenAI's image_url)
+// so they survive round-tripping through the pipeline.
 type ContentBlock struct {
 	Type         string                 `json:"type"`
 	Text         string                 `json:"text,omitempty"`
@@ -35,6 +38,75 @@ type ContentBlock struct {
 	ToolUseID    string                 `json:"tool_use_id,omitempty"`
 	Content      interface{}            `json:"content,omitempty"`
 	CacheControl map[string]interface{} `json:"cache_control,omitempty"`
+	Extra        map[string]interface{} `json:"-"`
+}
+
+// knownContentBlockKeys lists the JSON keys that map to explicit struct fields.
+var knownContentBlockKeys = map[string]bool{
+	"type": true, "text": true, "source": true, "id": true,
+	"name": true, "input": true, "tool_use_id": true,
+	"content": true, "cache_control": true,
+}
+
+// UnmarshalJSON implements custom unmarshaling that captures unknown fields
+// into the Extra map (e.g. OpenAI's image_url, detail, etc.).
+func (cb *ContentBlock) UnmarshalJSON(data []byte) error {
+	// Unmarshal known fields via an alias to avoid recursion.
+	type Alias ContentBlock
+	var alias Alias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*cb = ContentBlock(alias)
+
+	// Unmarshal into a generic map to find unknown keys.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for key, val := range raw {
+		if knownContentBlockKeys[key] {
+			continue
+		}
+		if cb.Extra == nil {
+			cb.Extra = make(map[string]interface{})
+		}
+		var v interface{}
+		if err := json.Unmarshal(val, &v); err != nil {
+			cb.Extra[key] = string(val)
+		} else {
+			cb.Extra[key] = v
+		}
+	}
+	return nil
+}
+
+// MarshalJSON implements custom marshaling that emits Extra fields alongside
+// the known struct fields, preserving round-trip fidelity.
+func (cb ContentBlock) MarshalJSON() ([]byte, error) {
+	// Marshal known fields via an alias to avoid recursion.
+	type Alias ContentBlock
+	data, err := json.Marshal(Alias(cb))
+	if err != nil {
+		return nil, err
+	}
+	if len(cb.Extra) == 0 {
+		return data, nil
+	}
+
+	// Merge extra fields into the JSON object.
+	var base map[string]json.RawMessage
+	if err := json.Unmarshal(data, &base); err != nil {
+		return nil, err
+	}
+	for key, val := range cb.Extra {
+		encoded, err := json.Marshal(val)
+		if err != nil {
+			continue
+		}
+		base[key] = encoded
+	}
+	return json.Marshal(base)
 }
 
 // ToolCall represents a tool call.

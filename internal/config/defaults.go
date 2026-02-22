@@ -123,6 +123,7 @@ func DefaultConfig() *Config {
 			StreamTimeout:     DefaultStreamTimeout,
 			MaxStreamSessions: DefaultMaxStreamSessions,
 			SessionTTL:        DefaultSessionTTL,
+			StoreBody:         false,
 		},
 		Auth: AuthConfig{
 			Enabled: false,

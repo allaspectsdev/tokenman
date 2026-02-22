@@ -26,9 +26,12 @@ import (
 // persist for debugging. Bodies larger than this are not stored.
 const maxBodyStoreSize = 1 << 20 // 1 MB
 
-// bodyForStore returns the body as a string if it is under the maximum
-// storage size, otherwise it returns an empty string.
-func bodyForStore(b []byte) string {
+// bodyForStore returns the body as a string if storage is enabled and the body
+// is under the maximum storage size. Returns empty string otherwise.
+func bodyForStore(b []byte, enabled bool) string {
+	if !enabled {
+		return ""
+	}
 	if len(b) > maxBodyStoreSize {
 		return ""
 	}
@@ -59,6 +62,7 @@ type ProxyHandler struct {
 	streamTimeout   time.Duration
 	cbRegistry      *CircuitBreakerRegistry
 	retryConfig     RetryConfig
+	storeBody       bool
 }
 
 // NewProxyHandler creates a new ProxyHandler with the given pipeline chain,
@@ -81,6 +85,7 @@ func NewProxyHandler(
 	rtr *router.Router,
 	maxStreamSessions int,
 	sessionTTL time.Duration,
+	storeBody bool,
 ) *ProxyHandler {
 	return &ProxyHandler{
 		chain:           chain,
@@ -96,6 +101,7 @@ func NewProxyHandler(
 		streamTimeout:   streamTimeout,
 		cbRegistry:      cbRegistry,
 		retryConfig:     retryConfig,
+		storeBody:       storeBody,
 	}
 }
 
@@ -401,8 +407,8 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				StatusCode:   cachedResp.StatusCode,
 				CacheHit:     true,
 				RequestType:  "cache_hit",
-				RequestBody:  bodyForStore(body),
-				ResponseBody: bodyForStore(cachedResp.Body),
+				RequestBody:  bodyForStore(body, h.storeBody),
+				ResponseBody: bodyForStore(cachedResp.Body, h.storeBody),
 				Project:      project,
 			}); err != nil {
 				logger.Error().Err(err).Msg("failed to persist request record")
@@ -497,8 +503,8 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				LatencyMs:    time.Since(startTime).Milliseconds(),
 				StatusCode:   upstreamResp.StatusCode,
 				RequestType:  "upstream_error",
-				RequestBody:  bodyForStore(body),
-				ResponseBody: bodyForStore(errBody),
+				RequestBody:  bodyForStore(body, h.storeBody),
+				ResponseBody: bodyForStore(errBody, h.storeBody),
 				Project:      project,
 			}); err != nil {
 				logger.Error().Err(err).Msg("failed to persist request record")
@@ -568,7 +574,7 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				CacheHit:     pipeResp.CacheHit,
 				RequestType:  "normal",
 				Provider:     pipeResp.Provider,
-				RequestBody:  bodyForStore(body),
+				RequestBody:  bodyForStore(body, h.storeBody),
 				Project:      project,
 			}); err != nil {
 				logger.Error().Err(err).Msg("failed to persist request record")
@@ -657,8 +663,8 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			CacheHit:     pipeResp.CacheHit,
 			RequestType:  "normal",
 			Provider:     pipeResp.Provider,
-			RequestBody:  bodyForStore(body),
-			ResponseBody: bodyForStore(respBody),
+			RequestBody:  bodyForStore(body, h.storeBody),
+			ResponseBody: bodyForStore(respBody, h.storeBody),
 			Project:      project,
 		}); err != nil {
 			logger.Error().Err(err).Msg("failed to persist request record")

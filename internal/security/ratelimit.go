@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,7 +102,7 @@ var _ pipeline.Middleware = (*RateLimitMiddleware)(nil)
 func NewRateLimitMiddleware(defaultRate float64, defaultBurst int, providerLimits map[string]config.ProviderRateLimit, enabled bool) *RateLimitMiddleware {
 	limiters := make(map[string]*tokenBucket, len(providerLimits))
 	for name, pl := range providerLimits {
-		limiters[name] = newTokenBucket(pl.Rate, pl.Burst)
+		limiters[strings.ToLower(name)] = newTokenBucket(pl.Rate, pl.Burst)
 	}
 
 	return &RateLimitMiddleware{
@@ -159,7 +160,7 @@ func (rl *RateLimitMiddleware) resolveProvider(req *pipeline.Request) string {
 	if req.Metadata != nil {
 		if p, ok := req.Metadata["provider"]; ok {
 			if ps, ok := p.(string); ok && ps != "" {
-				return ps
+				return strings.ToLower(ps)
 			}
 		}
 	}
@@ -197,7 +198,7 @@ func (rl *RateLimitMiddleware) Reconfigure(defaultRate float64, defaultBurst int
 	// Rebuild all buckets.
 	newLimiters := make(map[string]*tokenBucket, len(providerLimits))
 	for name, pl := range providerLimits {
-		newLimiters[name] = newTokenBucket(pl.Rate, pl.Burst)
+		newLimiters[strings.ToLower(name)] = newTokenBucket(pl.Rate, pl.Burst)
 	}
 	rl.limiters = newLimiters
 }

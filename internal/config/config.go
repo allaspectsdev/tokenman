@@ -68,6 +68,7 @@ type ServerConfig struct {
 	StreamTimeout     int    `mapstructure:"stream_timeout"       toml:"stream_timeout"`
 	MaxStreamSessions int    `mapstructure:"max_stream_sessions"  toml:"max_stream_sessions"`
 	SessionTTL        int    `mapstructure:"session_ttl"          toml:"session_ttl"`
+	StoreBody         bool   `mapstructure:"store_body"           toml:"store_body"`
 }
 
 // AuthConfig holds the dashboard authentication settings.
@@ -403,6 +404,7 @@ func setViperDefaults(v *viper.Viper) {
 	v.SetDefault("server.write_timeout", d.Server.WriteTimeout)
 	v.SetDefault("server.idle_timeout", d.Server.IdleTimeout)
 	v.SetDefault("server.max_body_size", d.Server.MaxBodySize)
+	v.SetDefault("server.store_body", d.Server.StoreBody)
 
 	// Auth
 	v.SetDefault("auth.enabled", d.Auth.Enabled)

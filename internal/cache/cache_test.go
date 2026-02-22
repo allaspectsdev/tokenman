@@ -48,45 +48,122 @@ func (m *mockCacheStore) DeleteExpired() error {
 // ---------------------------------------------------------------------------
 
 func TestCacheKey_SameInputsSameKey(t *testing.T) {
-	msgs := []pipeline.Message{
-		{Role: "user", Content: "hello"},
+	req := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
 	}
-	key1 := CacheKey("gpt-4", msgs, nil)
-	key2 := CacheKey("gpt-4", msgs, nil)
+	key1 := CacheKey(req)
+	key2 := CacheKey(req)
 	if key1 != key2 {
 		t.Errorf("expected identical keys, got %q and %q", key1, key2)
 	}
 }
 
 func TestCacheKey_DifferentModelDifferentKey(t *testing.T) {
-	msgs := []pipeline.Message{
-		{Role: "user", Content: "hello"},
+	req1 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
 	}
-	key1 := CacheKey("gpt-4", msgs, nil)
-	key2 := CacheKey("gpt-3.5", msgs, nil)
+	req2 := &pipeline.Request{
+		Model:    "gpt-3.5",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+	}
+	key1 := CacheKey(req1)
+	key2 := CacheKey(req2)
 	if key1 == key2 {
 		t.Errorf("expected different keys for different models, both got %q", key1)
 	}
 }
 
 func TestCacheKey_DifferentMessagesDifferentKey(t *testing.T) {
-	msgs1 := []pipeline.Message{{Role: "user", Content: "hello"}}
-	msgs2 := []pipeline.Message{{Role: "user", Content: "goodbye"}}
-	key1 := CacheKey("gpt-4", msgs1, nil)
-	key2 := CacheKey("gpt-4", msgs2, nil)
+	req1 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+	}
+	req2 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "goodbye"}},
+	}
+	key1 := CacheKey(req1)
+	key2 := CacheKey(req2)
 	if key1 == key2 {
 		t.Errorf("expected different keys for different messages, both got %q", key1)
 	}
 }
 
 func TestCacheKey_DifferentToolsDifferentKey(t *testing.T) {
-	msgs := []pipeline.Message{{Role: "user", Content: "hello"}}
-	tools1 := []pipeline.Tool{{Name: "tool_a"}}
-	tools2 := []pipeline.Tool{{Name: "tool_b"}}
-	key1 := CacheKey("gpt-4", msgs, tools1)
-	key2 := CacheKey("gpt-4", msgs, tools2)
+	req1 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+		Tools:    []pipeline.Tool{{Name: "tool_a"}},
+	}
+	req2 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+		Tools:    []pipeline.Tool{{Name: "tool_b"}},
+	}
+	key1 := CacheKey(req1)
+	key2 := CacheKey(req2)
 	if key1 == key2 {
 		t.Errorf("expected different keys for different tools, both got %q", key1)
+	}
+}
+
+func TestCacheKey_DifferentSystemPromptDifferentKey(t *testing.T) {
+	req1 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+		System:   "You are a math tutor",
+	}
+	req2 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+		System:   "You are a code reviewer",
+	}
+	key1 := CacheKey(req1)
+	key2 := CacheKey(req2)
+	if key1 == key2 {
+		t.Errorf("expected different keys for different system prompts, both got %q", key1)
+	}
+}
+
+func TestCacheKey_DifferentSystemBlocksDifferentKey(t *testing.T) {
+	req1 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+		SystemBlocks: []pipeline.ContentBlock{
+			{Type: "text", Text: "block A"},
+		},
+	}
+	req2 := &pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
+		SystemBlocks: []pipeline.ContentBlock{
+			{Type: "text", Text: "block B"},
+		},
+	}
+	key1 := CacheKey(req1)
+	key2 := CacheKey(req2)
+	if key1 == key2 {
+		t.Errorf("expected different keys for different system blocks, both got %q", key1)
+	}
+}
+
+func TestCacheKey_DifferentMaxTokensDifferentKey(t *testing.T) {
+	req1 := &pipeline.Request{
+		Model:     "gpt-4",
+		Messages:  []pipeline.Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 100,
+	}
+	req2 := &pipeline.Request{
+		Model:     "gpt-4",
+		Messages:  []pipeline.Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 4096,
+	}
+	key1 := CacheKey(req1)
+	key2 := CacheKey(req2)
+	if key1 == key2 {
+		t.Errorf("expected different keys for different max_tokens, both got %q", key1)
 	}
 }
 
@@ -167,7 +244,7 @@ func TestProcessRequest_CacheHit_Memory(t *testing.T) {
 		Model:    "gpt-4",
 		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
 	}
-	key := CacheKey(req.Model, req.Messages, req.Tools)
+	key := CacheKey(req)
 
 	// Pre-populate the in-memory LRU cache.
 	entry := &CacheEntry{
@@ -208,7 +285,7 @@ func TestProcessRequest_CacheHit_PersistentStore(t *testing.T) {
 		Model:    "gpt-4",
 		Messages: []pipeline.Message{{Role: "user", Content: "hello"}},
 	}
-	key := CacheKey(req.Model, req.Messages, req.Tools)
+	key := CacheKey(req)
 
 	// Put entry only in persistent store (not in memory).
 	entry := &CacheEntry{
@@ -359,14 +436,23 @@ func TestLRUEviction(t *testing.T) {
 	}
 
 	// The first key should have been evicted.
-	firstKey := CacheKey("gpt-4", []pipeline.Message{{Role: "user", Content: "first"}}, nil)
+	firstKey := CacheKey(&pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "first"}},
+	})
 	if _, ok := mw.memory.Get(firstKey); ok {
 		t.Error("expected 'first' to be evicted from LRU")
 	}
 
 	// The second and third should still be present.
-	secondKey := CacheKey("gpt-4", []pipeline.Message{{Role: "user", Content: "second"}}, nil)
-	thirdKey := CacheKey("gpt-4", []pipeline.Message{{Role: "user", Content: "third"}}, nil)
+	secondKey := CacheKey(&pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "second"}},
+	})
+	thirdKey := CacheKey(&pipeline.Request{
+		Model:    "gpt-4",
+		Messages: []pipeline.Message{{Role: "user", Content: "third"}},
+	})
 	if _, ok := mw.memory.Get(secondKey); !ok {
 		t.Error("expected 'second' to still be in LRU")
 	}

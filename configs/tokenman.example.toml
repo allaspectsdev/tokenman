@@ -24,7 +24,13 @@ proxy_port = 7677
 dashboard_port = 7678
 
 # Log level: trace, debug, info, warn, error, fatal.
+# Set to "debug" for API call metadata (tokens, costs, timing).
+# Set to "trace" to also log request/response bodies.
 log_level = "info"
+
+# Maximum bytes of request/response bodies to include in trace logs.
+# Set to 0 for unlimited (log full bodies). Default: 0.
+# max_log_body = 0
 
 # Data directory for SQLite database, logs, and other runtime files.
 # A leading ~ is expanded to the user's home directory.

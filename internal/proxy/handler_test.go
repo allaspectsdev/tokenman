@@ -92,7 +92,7 @@ func newTestHandler(chain *pipeline.Chain, upstreamURL string) *ProxyHandler {
 		rtr = router.NewRouter(nil, nil, "", false)
 	}
 
-	return NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, nil, RetryConfig{}, rtr, 0, 0, false)
+	return NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, nil, RetryConfig{}, rtr, 0, 0, false, 0)
 }
 
 // newTestServer creates a chi-based Server with the given handler and returns
@@ -358,7 +358,7 @@ func TestRetry_SucceedsOnSecondAttempt(t *testing.T) {
 		},
 	}, nil, "test-provider", false)
 
-	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig, rtr, 0, 0, false)
+	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig, rtr, 0, 0, false, 0)
 
 	ts := newTestServer(handler)
 	defer ts.Close()
@@ -407,7 +407,7 @@ func TestRetry_Exhausted_Returns502(t *testing.T) {
 		},
 	}, nil, "test-provider", false)
 
-	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig, rtr, 0, 0, false)
+	handler := NewProxyHandler(chain, NewUpstreamClient(), zerolog.Nop(), collector, tok, nil, 0, 0, 0, cbRegistry, retryConfig, rtr, 0, 0, false, 0)
 
 	ts := newTestServer(handler)
 	defer ts.Close()

@@ -76,6 +76,7 @@ func setupIntegration(t *testing.T, upstreamHandler http.HandlerFunc) (*Server, 
 		0,     // no stream session limit
 		0,     // no session TTL
 		false, // no body storage
+		0,     // no log body limit
 	)
 
 	srv := NewServer(handler, ":0", 0, 0, 0, false, "")
@@ -393,7 +394,7 @@ func TestIntegration_RequestPersistence(t *testing.T) {
 	}, nil, "anthropic", false)
 
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, st,
-		10<<20, 0, 0, nil, RetryConfig{}, rtr, 0, 0, false)
+		10<<20, 0, 0, nil, RetryConfig{}, rtr, 0, 0, false, 0)
 
 	srv := NewServer(handler, ":0", 0, 0, 0, false, "")
 
@@ -447,7 +448,7 @@ func TestIntegration_ProjectHeader(t *testing.T) {
 	}, nil, "anthropic", false)
 
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, st,
-		10<<20, 0, 0, nil, RetryConfig{}, rtr, 0, 0, false)
+		10<<20, 0, 0, nil, RetryConfig{}, rtr, 0, 0, false, 0)
 	srv := NewServer(handler, ":0", 0, 0, 0, false, "")
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hi"}],"max_tokens":100,"stream":false}`
@@ -497,7 +498,7 @@ func TestIntegration_MaxBodySize(t *testing.T) {
 
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, nil,
 		100, // 100 byte max body size
-		0, 0, nil, RetryConfig{}, rtr, 0, 0, false)
+		0, 0, nil, RetryConfig{}, rtr, 0, 0, false, 0)
 	srv := NewServer(handler, ":0", 0, 0, 0, false, "")
 
 	// Build a body larger than 100 bytes.
@@ -537,7 +538,7 @@ func TestIntegration_ResponseSizeLimit(t *testing.T) {
 	handler := NewProxyHandler(chain, NewUpstreamClient(), logger, collector, nil, nil,
 		10<<20,
 		100, // 100 byte max response size
-		0, nil, RetryConfig{}, rtr, 0, 0, false)
+		0, nil, RetryConfig{}, rtr, 0, 0, false, 0)
 	srv := NewServer(handler, ":0", 0, 0, 0, false, "")
 
 	body := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hi"}],"max_tokens":100,"stream":false}`
@@ -624,6 +625,7 @@ func setupIntegrationWithRetry(t *testing.T, upstreamHandler http.HandlerFunc) (
 		0,
 		0,
 		false,
+		0,
 	)
 
 	srv := NewServer(handler, ":0", 0, 0, 0, false, "")

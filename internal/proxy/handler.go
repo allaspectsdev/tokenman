@@ -38,6 +38,15 @@ func bodyForStore(b []byte, enabled bool) string {
 	return string(b)
 }
 
+// truncateBody returns the body as a string, truncated to maxBytes.
+// If maxBytes is 0 or negative, the full body is returned.
+func truncateBody(b []byte, maxBytes int) string {
+	if maxBytes <= 0 || len(b) <= maxBytes {
+		return string(b)
+	}
+	return string(b[:maxBytes]) + "...(truncated)"
+}
+
 // ProviderConfig holds the configuration needed to route a request to an upstream provider.
 type ProviderConfig struct {
 	BaseURL string
@@ -63,6 +72,7 @@ type ProxyHandler struct {
 	cbRegistry      *CircuitBreakerRegistry
 	retryConfig     RetryConfig
 	storeBody       bool
+	maxLogBody      int
 }
 
 // NewProxyHandler creates a new ProxyHandler with the given pipeline chain,
@@ -86,6 +96,7 @@ func NewProxyHandler(
 	maxStreamSessions int,
 	sessionTTL time.Duration,
 	storeBody bool,
+	maxLogBody int,
 ) *ProxyHandler {
 	return &ProxyHandler{
 		chain:           chain,
@@ -102,6 +113,7 @@ func NewProxyHandler(
 		cbRegistry:      cbRegistry,
 		retryConfig:     retryConfig,
 		storeBody:       storeBody,
+		maxLogBody:      maxLogBody,
 	}
 }
 
@@ -337,6 +349,16 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info().Msg("processing request")
 
+	logger.Debug().
+		Int("tokens_in", pipeReq.TokensIn).
+		Int("max_tokens", pipeReq.MaxTokens).
+		Int("message_count", len(pipeReq.Messages)).
+		Int("body_size", len(body)).
+		Msg("parsed request")
+	logger.Trace().
+		Str("request_body", truncateBody(body, h.maxLogBody)).
+		Msg("raw request body")
+
 	// Step 4: Run the pipeline chain's request phase.
 	pipeReq, cachedResp, err := h.chain.ProcessRequest(ctx, pipeReq)
 	if err != nil {
@@ -386,6 +408,10 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Step 5: If the pipeline returned a cached response, write it directly.
 	if cachedResp != nil {
+		logger.Debug().
+			Int("cached_body_size", len(cachedResp.Body)).
+			Int("status", cachedResp.StatusCode).
+			Msg("cache hit details")
 		logger.Info().Msg("returning cached response")
 		w.Header().Set("X-Tokenman-Cache", "HIT")
 		writeCachedResponse(w, cachedResp)
@@ -419,6 +445,13 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Step 5b: Rebuild RawBody from modified request fields.
 	pipeReq.RawBody = rebuildRequestBody(pipeReq)
+
+	logger.Debug().
+		Int("rebuilt_body_size", len(pipeReq.RawBody)).
+		Msg("rebuilt request body for upstream")
+	logger.Trace().
+		Str("rebuilt_body", truncateBody(pipeReq.RawBody, h.maxLogBody)).
+		Msg("upstream request body")
 
 	// Step 6 + 7: Resolve provider and forward with retry/fallback.
 	var upstreamResp *http.Response
@@ -542,6 +575,13 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		pipeResp.RequestID = requestID
 		pipeResp.Latency = time.Since(startTime)
+		pipeResp.CostUSD = tokenizer.EstimateCost(pipeReq.Model, pipeReq.TokensIn, pipeResp.TokensOut)
+
+		logger.Debug().
+			Int("tokens_out", pipeResp.TokensOut).
+			Float64("cost_usd", pipeResp.CostUSD).
+			Int("status", pipeResp.StatusCode).
+			Msg("streaming response completed")
 
 		// Run the response pipeline for metrics/logging purposes.
 		if _, respErr := h.chain.ProcessResponse(ctx, pipeReq, pipeResp); respErr != nil {
@@ -618,6 +658,23 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		Latency:    time.Since(startTime),
 		Flags:      make(map[string]bool),
 	}
+
+	// Parse usage from response body.
+	tokensOut, tokensCached := extractResponseUsage(respBody, format)
+	pipeResp.TokensOut = tokensOut
+	pipeResp.TokensCached = tokensCached
+	pipeResp.CostUSD = tokenizer.EstimateCost(pipeReq.Model, pipeReq.TokensIn, tokensOut)
+
+	logger.Debug().
+		Int("tokens_out", tokensOut).
+		Int("tokens_cached", tokensCached).
+		Float64("cost_usd", pipeResp.CostUSD).
+		Int("status", pipeResp.StatusCode).
+		Int("response_body_size", len(respBody)).
+		Msg("upstream response received")
+	logger.Trace().
+		Str("response_body", truncateBody(respBody, h.maxLogBody)).
+		Msg("upstream response body")
 
 	// Step 9: Run the pipeline chain's response phase.
 	pipeResp, err = h.chain.ProcessResponse(ctx, pipeReq, pipeResp)
@@ -1002,6 +1059,39 @@ func capCacheControlBlocks(systemBlocks []pipeline.ContentBlock, messages []pipe
 	for j := 0; j < len(sysIndices) && excess > 0; j++ {
 		systemBlocks[sysIndices[j]].CacheControl = nil
 		excess--
+	}
+}
+
+// extractResponseUsage parses the upstream response body to extract token usage
+// counts. It handles both Anthropic and OpenAI response formats.
+func extractResponseUsage(body []byte, format pipeline.APIFormat) (tokensOut, tokensCached int) {
+	var raw struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || raw.Usage == nil {
+		return 0, 0
+	}
+
+	switch format {
+	case pipeline.FormatAnthropic:
+		var usage struct {
+			OutputTokens         int `json:"output_tokens"`
+			CacheReadInputTokens int `json:"cache_read_input_tokens"`
+		}
+		if err := json.Unmarshal(raw.Usage, &usage); err != nil {
+			return 0, 0
+		}
+		return usage.OutputTokens, usage.CacheReadInputTokens
+	case pipeline.FormatOpenAI:
+		var usage struct {
+			CompletionTokens int `json:"completion_tokens"`
+		}
+		if err := json.Unmarshal(raw.Usage, &usage); err != nil {
+			return 0, 0
+		}
+		return usage.CompletionTokens, 0
+	default:
+		return 0, 0
 	}
 }
 

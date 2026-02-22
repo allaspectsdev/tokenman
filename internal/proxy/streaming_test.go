@@ -212,10 +212,11 @@ func TestHandleStreaming_EmptyStream(t *testing.T) {
 
 func TestExtractDelta_Anthropic(t *testing.T) {
 	tests := []struct {
-		name      string
-		data      string
-		wantDelta string
-		wantModel string
+		name       string
+		data       string
+		wantDelta  string
+		wantModel  string
+		wantTokens int
 	}{
 		{
 			name:      "text delta",
@@ -226,6 +227,11 @@ func TestExtractDelta_Anthropic(t *testing.T) {
 			name:      "message start",
 			data:      `{"type":"message_start","message":{"model":"claude-sonnet-4-20250514"}}`,
 			wantModel: "claude-sonnet-4-20250514",
+		},
+		{
+			name:       "message delta with usage",
+			data:       `{"type":"message_delta","usage":{"output_tokens":456}}`,
+			wantTokens: 456,
 		},
 		{
 			name: "other event",
@@ -239,12 +245,15 @@ func TestExtractDelta_Anthropic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			delta, model := extractDelta(tt.data, pipeline.FormatAnthropic)
+			delta, model, tokens := extractDelta(tt.data, pipeline.FormatAnthropic)
 			if delta != tt.wantDelta {
 				t.Errorf("delta: got %q, want %q", delta, tt.wantDelta)
 			}
 			if model != tt.wantModel {
 				t.Errorf("model: got %q, want %q", model, tt.wantModel)
+			}
+			if tokens != tt.wantTokens {
+				t.Errorf("tokens: got %d, want %d", tokens, tt.wantTokens)
 			}
 		})
 	}
@@ -276,7 +285,7 @@ func TestExtractDelta_OpenAI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			delta, model := extractDelta(tt.data, pipeline.FormatOpenAI)
+			delta, model, _ := extractDelta(tt.data, pipeline.FormatOpenAI)
 			if delta != tt.wantDelta {
 				t.Errorf("delta: got %q, want %q", delta, tt.wantDelta)
 			}
@@ -288,8 +297,8 @@ func TestExtractDelta_OpenAI(t *testing.T) {
 }
 
 func TestExtractDelta_UnknownFormat(t *testing.T) {
-	delta, model := extractDelta(`{"data":"test"}`, pipeline.FormatUnknown)
-	if delta != "" || model != "" {
-		t.Errorf("unknown format should return empty, got delta=%q model=%q", delta, model)
+	delta, model, tokens := extractDelta(`{"data":"test"}`, pipeline.FormatUnknown)
+	if delta != "" || model != "" || tokens != 0 {
+		t.Errorf("unknown format should return empty, got delta=%q model=%q tokens=%d", delta, model, tokens)
 	}
 }

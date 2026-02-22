@@ -305,6 +305,7 @@ func Run(cfg *config.Config, foreground bool) error {
 		cfg.Server.MaxStreamSessions,
 		sessionTTL,
 		cfg.Server.StoreBody,
+		cfg.Server.MaxLogBody,
 	)
 
 	proxyAddr := fmt.Sprintf("%s:%d", cfg.Server.BindAddress, cfg.Server.ProxyPort)

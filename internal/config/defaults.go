@@ -61,6 +61,10 @@ const DefaultMaxStreamSessions = 100
 // DefaultSessionTTL is the default stream session time-to-live in seconds (1 hour).
 const DefaultSessionTTL = 3600
 
+// DefaultMaxLogBody is the default maximum body size in debug/trace logs (bytes).
+// 0 means unlimited (log the full body).
+const DefaultMaxLogBody = 0
+
 // DefaultRetryMaxAttempts is the default maximum number of retry attempts per provider.
 const DefaultRetryMaxAttempts = 3
 
@@ -124,6 +128,7 @@ func DefaultConfig() *Config {
 			MaxStreamSessions: DefaultMaxStreamSessions,
 			SessionTTL:        DefaultSessionTTL,
 			StoreBody:         false,
+			MaxLogBody:        DefaultMaxLogBody,
 		},
 		Auth: AuthConfig{
 			Enabled: false,

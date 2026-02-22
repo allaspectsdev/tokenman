@@ -12,15 +12,18 @@ type ModelPricing struct {
 var Pricing = map[string]ModelPricing{
 	// Claude models — full identifiers
 	"claude-opus-4-20250514":     {15.00, 75.00},
+	"claude-opus-4-6":            {15.00, 75.00},
 	"claude-sonnet-4-20250514":   {3.00, 15.00},
+	"claude-sonnet-4-6":          {3.00, 15.00},
 	"claude-sonnet-4-5-20241022": {3.00, 15.00},
 	"claude-haiku-4-5-20241022":  {0.80, 4.00},
+	"claude-haiku-4-5-20251001":  {0.80, 4.00},
 
 	// Claude models — short aliases
-	"claude-opus-4":    {15.00, 75.00},
-	"claude-sonnet-4":  {3.00, 15.00},
+	"claude-opus-4":     {15.00, 75.00},
+	"claude-sonnet-4":   {3.00, 15.00},
 	"claude-sonnet-4-5": {3.00, 15.00},
-	"claude-haiku-4-5": {0.80, 4.00},
+	"claude-haiku-4-5":  {0.80, 4.00},
 
 	// OpenAI models
 	"gpt-4o":      {2.50, 10.00},

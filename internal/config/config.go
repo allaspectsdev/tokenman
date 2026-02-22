@@ -52,6 +52,7 @@ type Config struct {
 
 // ServerConfig holds the core server settings.
 type ServerConfig struct {
+	BindAddress     string `mapstructure:"bind_address"       toml:"bind_address"`
 	ProxyPort       int    `mapstructure:"proxy_port"        toml:"proxy_port"`
 	DashboardPort   int    `mapstructure:"dashboard_port"    toml:"dashboard_port"`
 	LogLevel        string `mapstructure:"log_level"          toml:"log_level"`
@@ -389,6 +390,7 @@ func setViperDefaults(v *viper.Viper) {
 	d := DefaultConfig()
 
 	// Server
+	v.SetDefault("server.bind_address", d.Server.BindAddress)
 	v.SetDefault("server.proxy_port", d.Server.ProxyPort)
 	v.SetDefault("server.dashboard_port", d.Server.DashboardPort)
 	v.SetDefault("server.log_level", d.Server.LogLevel)

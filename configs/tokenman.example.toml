@@ -12,6 +12,11 @@
 # Server
 # ----------------------------------------------------------------------------
 [server]
+# Bind address for both proxy and dashboard servers.
+# Default is "127.0.0.1" (localhost only). Set to "0.0.0.0" to listen on all
+# interfaces (NOT recommended without enabling [auth] below).
+bind_address = "127.0.0.1"
+
 # Port the proxy server listens on.
 proxy_port = 7677
 
@@ -45,13 +50,15 @@ data_dir = "~/.tokenman"
 # stream_timeout = 600
 
 # ----------------------------------------------------------------------------
-# Auth  (dashboard authentication)
+# Auth  (proxy + dashboard authentication)
 # ----------------------------------------------------------------------------
 [auth]
-# Enable bearer-token authentication for the dashboard API.
+# Enable bearer-token authentication for both the proxy and dashboard APIs.
+# When enabled, all proxy routes (except GET /health) and dashboard API routes
+# require an "Authorization: Bearer <token>" header.
 enabled = false
 
-# The token required for dashboard API requests.  Only used when enabled=true.
+# The token required for API requests.  Only used when enabled=true.
 token = ""
 
 # ----------------------------------------------------------------------------
@@ -155,11 +162,11 @@ action = "log"
 [security.budget]
 # Enable spend budget enforcement.
 enabled = false
-# Maximum spend per hour in cents (0 = unlimited).
+# Maximum spend per hour in USD (0 = unlimited).
 hourly_limit = 0
-# Maximum spend per day in cents (0 = unlimited).
+# Maximum spend per day in USD (0 = unlimited).
 daily_limit = 0
-# Maximum spend per month in cents (0 = unlimited).
+# Maximum spend per month in USD (0 = unlimited).
 monthly_limit = 0
 # Alert when spend reaches these percentages of the active limit.
 alert_thresholds = [50.0, 75.0, 90.0]
@@ -208,9 +215,9 @@ alert_thresholds = [50.0, 75.0, 90.0]
 enabled = true
 # Automatically open the dashboard in the default browser on start.
 auto_open = false
-# Allowed CORS origins. Use ["*"] to allow all (default, for local dev).
-# For production, restrict to your dashboard domain(s).
-# allowed_origins = ["https://dashboard.example.com"]
+# Allowed CORS origins. Default is localhost only. Use ["*"] to allow all
+# (not recommended for production).
+# allowed_origins = ["http://localhost:7677", "http://localhost:7678"]
 
 # ----------------------------------------------------------------------------
 # Metrics

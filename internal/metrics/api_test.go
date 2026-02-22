@@ -258,16 +258,27 @@ func TestDashboard_AuthMiddleware(t *testing.T) {
 	}
 }
 
-func TestDashboard_CORS_AllowAll(t *testing.T) {
+func TestDashboard_CORS_DefaultOrigins(t *testing.T) {
 	dash, _ := setupDashboard(t)
 
+	// Allowed origin (localhost:7678) should be reflected.
 	req := httptest.NewRequest("OPTIONS", "/api/health", nil)
-	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("Origin", "http://localhost:7678")
 	w := httptest.NewRecorder()
 	dash.router.ServeHTTP(w, req)
 
-	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Errorf("CORS origin: got %q, want %q", w.Header().Get("Access-Control-Allow-Origin"), "*")
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:7678" {
+		t.Errorf("CORS allowed origin: got %q, want %q", got, "http://localhost:7678")
+	}
+
+	// Unknown origin should be rejected on preflight.
+	req = httptest.NewRequest("OPTIONS", "/api/health", nil)
+	req.Header.Set("Origin", "https://example.com")
+	w = httptest.NewRecorder()
+	dash.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("CORS unknown origin preflight: got %d, want %d", w.Code, http.StatusForbidden)
 	}
 }
 

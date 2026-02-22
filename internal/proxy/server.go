@@ -22,10 +22,12 @@ type Server struct {
 }
 
 // NewServer creates a new Server with the given ProxyHandler, listen address,
-// and HTTP timeout durations. Zero-value timeouts leave the corresponding
-// http.Server field at its default (no timeout). If tracingEnabled is true,
-// the OpenTelemetry HTTP middleware is added to extract/inject trace context.
-func NewServer(handler *ProxyHandler, addr string, readTimeout, writeTimeout, idleTimeout time.Duration, tracingEnabled bool) *Server {
+// HTTP timeout durations, and optional auth token. Zero-value timeouts leave
+// the corresponding http.Server field at its default (no timeout). If
+// tracingEnabled is true, the OpenTelemetry HTTP middleware is added to
+// extract/inject trace context. If authToken is non-empty, all routes except
+// health checks require a valid Bearer token.
+func NewServer(handler *ProxyHandler, addr string, readTimeout, writeTimeout, idleTimeout time.Duration, tracingEnabled bool, authToken string) *Server {
 	r := chi.NewRouter()
 
 	// Standard chi middleware.
@@ -37,18 +39,27 @@ func NewServer(handler *ProxyHandler, addr string, readTimeout, writeTimeout, id
 		r.Use(tracing.HTTPMiddleware)
 	}
 
-	// Mount proxy routes.
-	r.Post("/v1/messages", handler.HandleRequest)
-	r.Post("/v1/chat/completions", handler.HandleRequest)
-	r.Get("/v1/models", handler.HandleModels)
+	// Health check routes — always unauthenticated for load balancers.
 	r.Get("/health", handler.HandleHealth)
 	r.Get("/health/ready", handler.HandleReady)
 
-	// Stream session routes (SSE-based bidirectional streaming).
-	r.Post("/v1/stream/create", handler.HandleStreamCreate)
-	r.Post("/v1/stream/{id}/send", handler.HandleStreamSend)
-	r.Get("/v1/stream/{id}/events", handler.HandleStreamEvents)
-	r.Delete("/v1/stream/{id}", handler.HandleStreamDelete)
+	// All other routes — conditionally protected by auth.
+	r.Group(func(r chi.Router) {
+		if authToken != "" {
+			r.Use(AuthMiddleware(authToken))
+		}
+
+		// Mount proxy routes.
+		r.Post("/v1/messages", handler.HandleRequest)
+		r.Post("/v1/chat/completions", handler.HandleRequest)
+		r.Get("/v1/models", handler.HandleModels)
+
+		// Stream session routes (SSE-based bidirectional streaming).
+		r.Post("/v1/stream/create", handler.HandleStreamCreate)
+		r.Post("/v1/stream/{id}/send", handler.HandleStreamSend)
+		r.Get("/v1/stream/{id}/events", handler.HandleStreamEvents)
+		r.Delete("/v1/stream/{id}", handler.HandleStreamDelete)
+	})
 
 	srv := &Server{
 		router:  r,

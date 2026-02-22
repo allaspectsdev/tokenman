@@ -1,5 +1,8 @@
 package config
 
+// DefaultBindAddress is the default bind address (localhost only for security).
+const DefaultBindAddress = "127.0.0.1"
+
 // DefaultProxyPort is the default port for the proxy server.
 const DefaultProxyPort = 7677
 
@@ -104,6 +107,7 @@ var ValidInjectionActions = []string{"log", "block", "sanitize", "warn"}
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
+			BindAddress:     DefaultBindAddress,
 			ProxyPort:       DefaultProxyPort,
 			DashboardPort:   DefaultDashboardPort,
 			LogLevel:        DefaultLogLevel,
@@ -222,7 +226,7 @@ func DefaultConfig() *Config {
 		Dashboard: DashboardConfig{
 			Enabled:        true,
 			AutoOpen:       false,
-			AllowedOrigins: []string{"*"},
+			AllowedOrigins: []string{"http://localhost:7677", "http://localhost:7678"},
 		},
 		Metrics: MetricsConfig{
 			RetentionDays:   DefaultRetentionDays,

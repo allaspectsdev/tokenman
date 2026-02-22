@@ -98,7 +98,7 @@ func newTestHandler(chain *pipeline.Chain, upstreamURL string) *ProxyHandler {
 // newTestServer creates a chi-based Server with the given handler and returns
 // a httptest.Server ready for requests.
 func newTestServer(handler *ProxyHandler) *httptest.Server {
-	srv := NewServer(handler, ":0", 0, 0, 0, false)
+	srv := NewServer(handler, ":0", 0, 0, 0, false, "")
 	return httptest.NewServer(srv.Router())
 }
 

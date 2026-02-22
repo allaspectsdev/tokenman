@@ -29,6 +29,7 @@ func cmdStart(args []string) {
 }
 
 func cmdStop() {
+	config.Load("")
 	if err := daemon.Stop(); err != nil {
 		fmt.Fprintf(os.Stderr, "error stopping daemon: %v\n", err)
 		os.Exit(1)
@@ -37,6 +38,7 @@ func cmdStop() {
 }
 
 func cmdStatus() {
+	config.Load("")
 	if err := daemon.Status(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)

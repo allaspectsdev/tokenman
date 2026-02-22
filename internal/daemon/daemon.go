@@ -37,7 +37,7 @@ import (
 func Run(cfg *config.Config, foreground bool) error {
 	// 1. Set up zerolog logger.
 	dataDir := expandHome(cfg.Server.DataDir)
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return fmt.Errorf("creating data directory %s: %w", dataDir, err)
 	}
 
@@ -48,7 +48,7 @@ func Run(cfg *config.Config, foreground bool) error {
 
 	// Always log to file.
 	logPath := filepath.Join(dataDir, "tokenman.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening log file %s: %w", logPath, err)
 	}
@@ -306,11 +306,16 @@ func Run(cfg *config.Config, foreground bool) error {
 		sessionTTL,
 	)
 
-	proxyAddr := fmt.Sprintf(":%d", cfg.Server.ProxyPort)
+	proxyAddr := fmt.Sprintf("%s:%d", cfg.Server.BindAddress, cfg.Server.ProxyPort)
 	readTimeout := time.Duration(cfg.Server.ReadTimeout) * time.Second
 	writeTimeout := time.Duration(cfg.Server.WriteTimeout) * time.Second
 	idleTimeout := time.Duration(cfg.Server.IdleTimeout) * time.Second
-	proxyServer := proxy.NewServer(proxyHandler, proxyAddr, readTimeout, writeTimeout, idleTimeout, cfg.Tracing.Enabled)
+	authToken := ""
+	if cfg.Auth.Enabled && cfg.Auth.Token != "" {
+		authToken = cfg.Auth.Token
+		log.Info().Msg("proxy API authentication enabled")
+	}
+	proxyServer := proxy.NewServer(proxyHandler, proxyAddr, readTimeout, writeTimeout, idleTimeout, cfg.Tracing.Enabled, authToken)
 
 	// Start cache purger and session reaper (reuse pruneCtx).
 	purgerDone := cacheMW.StartPurger(pruneCtx)
@@ -336,7 +341,7 @@ func Run(cfg *config.Config, foreground bool) error {
 	// 9. Create and start dashboard server (if enabled).
 	var dashServer *metrics.DashboardServer
 	if cfg.Dashboard.Enabled {
-		dashAddr := fmt.Sprintf(":%d", cfg.Server.DashboardPort)
+		dashAddr := fmt.Sprintf("%s:%d", cfg.Server.BindAddress, cfg.Server.DashboardPort)
 		dashServer = metrics.NewDashboardServer(collector, st, cfg, dashAddr)
 
 		go func() {
@@ -492,7 +497,11 @@ func Status() error {
 	fmt.Printf("tokenman is running (PID %d)\n", pid)
 
 	// Try to fetch stats from the dashboard API.
-	dashURL := fmt.Sprintf("http://localhost:%d/api/stats", cfg.Server.DashboardPort)
+	scheme := "http"
+	if cfg.Server.TLSEnabled {
+		scheme = "https"
+	}
+	dashURL := fmt.Sprintf("%s://localhost:%d/api/stats", scheme, cfg.Server.DashboardPort)
 	client := &http.Client{Timeout: 3 * time.Second}
 
 	resp, err := client.Get(dashURL)

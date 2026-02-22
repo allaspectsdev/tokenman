@@ -906,6 +906,7 @@ func rebuildAnthropicBody(req *pipeline.Request) []byte {
 	}
 	if len(req.SystemBlocks) > 0 {
 		sanitizeCacheControlTTLs(req.SystemBlocks)
+		capCacheControlBlocks(req.SystemBlocks, req.Messages)
 		body["system"] = req.SystemBlocks
 	} else if req.System != "" {
 		body["system"] = req.System
@@ -960,6 +961,48 @@ func rebuildOpenAIBody(req *pipeline.Request) []byte {
 		return req.RawBody
 	}
 	return data
+}
+
+// capCacheControlBlocks ensures no more than 4 cache_control blocks exist across
+// the entire request (system + messages), as required by the Anthropic API.
+// If the limit is exceeded, cache_control is removed from earlier system blocks
+// first, since later blocks provide better prefix-cache coverage.
+func capCacheControlBlocks(systemBlocks []pipeline.ContentBlock, messages []pipeline.Message) {
+	const maxBlocks = 4
+
+	// Count cache_control blocks in messages (these are client-set, don't touch).
+	msgCC := 0
+	for _, msg := range messages {
+		blocks, ok := msg.Content.([]pipeline.ContentBlock)
+		if !ok {
+			continue
+		}
+		for _, b := range blocks {
+			if b.CacheControl != nil {
+				msgCC++
+			}
+		}
+	}
+
+	// Count cache_control blocks in system blocks.
+	var sysIndices []int
+	for i, b := range systemBlocks {
+		if b.CacheControl != nil {
+			sysIndices = append(sysIndices, i)
+		}
+	}
+
+	total := msgCC + len(sysIndices)
+	if total <= maxBlocks {
+		return
+	}
+
+	// Remove excess from earlier system blocks (keep later ones for prefix coverage).
+	excess := total - maxBlocks
+	for j := 0; j < len(sysIndices) && excess > 0; j++ {
+		systemBlocks[sysIndices[j]].CacheControl = nil
+		excess--
+	}
 }
 
 // sanitizeCacheControlTTLs ensures cache_control TTL values on content blocks

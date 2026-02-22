@@ -57,6 +57,17 @@ func (d *DedupMiddleware) ProcessRequest(_ context.Context, req *pipeline.Reques
 
 	cacheEligible := 0
 
+	// Check if the client already manages cache_control on system blocks.
+	// If so, skip adding our own to avoid exceeding the 4-block limit and
+	// breaking TTL ordering constraints imposed by the Anthropic API.
+	clientManagesCC := false
+	for _, b := range req.SystemBlocks {
+		if b.CacheControl != nil {
+			clientManagesCC = true
+			break
+		}
+	}
+
 	// --- System prompt fingerprinting ---
 	if req.System != "" {
 		hash := HashContent(req.System)
@@ -67,13 +78,13 @@ func (d *DedupMiddleware) ProcessRequest(_ context.Context, req *pipeline.Reques
 
 		if d.seenWithinTTL(hash) {
 			cacheEligible += tokenCount
-			if req.Format == pipeline.FormatAnthropic {
+			if req.Format == pipeline.FormatAnthropic && !clientManagesCC {
 				req.SystemBlocks = annotateCacheControl(req.SystemBlocks, req.System)
 			}
 		}
 	}
 
-	// Also handle structured system blocks.
+	// Also handle structured system blocks (fingerprinting only when client manages CC).
 	for i, block := range req.SystemBlocks {
 		if block.Text == "" {
 			continue
@@ -85,9 +96,7 @@ func (d *DedupMiddleware) ProcessRequest(_ context.Context, req *pipeline.Reques
 		}
 		if d.seenWithinTTL(hash) {
 			cacheEligible += tokenCount
-			if req.Format == pipeline.FormatAnthropic {
-				// Only add cache_control if the block doesn't already have
-				// one set by the client, to avoid breaking TTL ordering.
+			if req.Format == pipeline.FormatAnthropic && !clientManagesCC {
 				if req.SystemBlocks[i].CacheControl == nil {
 					req.SystemBlocks[i].CacheControl = map[string]interface{}{
 						"type": "ephemeral",

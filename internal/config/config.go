@@ -62,9 +62,11 @@ type ServerConfig struct {
 	ReadTimeout     int    `mapstructure:"read_timeout"      toml:"read_timeout"`
 	WriteTimeout    int    `mapstructure:"write_timeout"     toml:"write_timeout"`
 	IdleTimeout     int    `mapstructure:"idle_timeout"      toml:"idle_timeout"`
-	MaxBodySize     int64  `mapstructure:"max_body_size"     toml:"max_body_size"`
-	MaxResponseSize int64  `mapstructure:"max_response_size" toml:"max_response_size"`
-	StreamTimeout   int    `mapstructure:"stream_timeout"    toml:"stream_timeout"`
+	MaxBodySize       int64  `mapstructure:"max_body_size"        toml:"max_body_size"`
+	MaxResponseSize   int64  `mapstructure:"max_response_size"    toml:"max_response_size"`
+	StreamTimeout     int    `mapstructure:"stream_timeout"       toml:"stream_timeout"`
+	MaxStreamSessions int    `mapstructure:"max_stream_sessions"  toml:"max_stream_sessions"`
+	SessionTTL        int    `mapstructure:"session_ttl"          toml:"session_ttl"`
 }
 
 // AuthConfig holds the dashboard authentication settings.
@@ -477,6 +479,8 @@ func setViperDefaults(v *viper.Viper) {
 	// Server (new resilience-related fields)
 	v.SetDefault("server.max_response_size", d.Server.MaxResponseSize)
 	v.SetDefault("server.stream_timeout", d.Server.StreamTimeout)
+	v.SetDefault("server.max_stream_sessions", d.Server.MaxStreamSessions)
+	v.SetDefault("server.session_ttl", d.Server.SessionTTL)
 
 	// Tracing
 	v.SetDefault("tracing.enabled", d.Tracing.Enabled)

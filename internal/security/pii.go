@@ -2,6 +2,8 @@ package security
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -77,7 +79,7 @@ var _ pipeline.Middleware = (*PIIMiddleware)(nil)
 
 // NewPIIMiddleware creates a new PIIMiddleware.
 //
-//   - action is one of "redact", "log", or "block".
+//   - action is one of "redact", "hash", "log", or "block".
 //   - allowList contains values that should be ignored during scanning.
 //   - enabled controls whether the middleware is active.
 func NewPIIMiddleware(action string, allowList []string, enabled bool) *PIIMiddleware {
@@ -117,11 +119,13 @@ func (p *PIIMiddleware) ProcessRequest(ctx context.Context, req *pipeline.Reques
 		msg := &req.Messages[i]
 		fieldPath := fmt.Sprintf("messages[%d].content", i)
 
+		replaces := p.action == "redact" || p.action == "hash"
+
 		switch c := msg.Content.(type) {
 		case string:
 			newContent, dets := p.scanAndProcess(c, fieldPath, mapping)
 			detections = append(detections, dets...)
-			if p.action == "redact" {
+			if replaces {
 				msg.Content = newContent
 			}
 
@@ -135,7 +139,7 @@ func (p *PIIMiddleware) ProcessRequest(ctx context.Context, req *pipeline.Reques
 				if text, ok := blockMap["text"].(string); ok {
 					newText, dets := p.scanAndProcess(text, blockPath+".text", mapping)
 					detections = append(detections, dets...)
-					if p.action == "redact" {
+					if replaces {
 						blockMap["text"] = newText
 						c[j] = blockMap
 					}
@@ -143,13 +147,13 @@ func (p *PIIMiddleware) ProcessRequest(ctx context.Context, req *pipeline.Reques
 				if content, ok := blockMap["content"].(string); ok {
 					newContent, dets := p.scanAndProcess(content, blockPath+".content", mapping)
 					detections = append(detections, dets...)
-					if p.action == "redact" {
+					if replaces {
 						blockMap["content"] = newContent
 						c[j] = blockMap
 					}
 				}
 			}
-			if p.action == "redact" {
+			if replaces {
 				msg.Content = c
 			}
 		}
@@ -159,7 +163,7 @@ func (p *PIIMiddleware) ProcessRequest(ctx context.Context, req *pipeline.Reques
 	if req.System != "" {
 		newSystem, dets := p.scanAndProcess(req.System, "system", mapping)
 		detections = append(detections, dets...)
-		if p.action == "redact" {
+		if p.action == "redact" || p.action == "hash" {
 			req.System = newSystem
 		}
 	}
@@ -238,6 +242,12 @@ func (p *PIIMiddleware) scanAndProcess(text, fieldPath string, mapping *PIIMappi
 			if p.action == "redact" {
 				ph := mapping.placeholder(match, pattern.Name)
 				result = strings.ReplaceAll(result, match, ph)
+			}
+			if p.action == "hash" {
+				h := sha256.Sum256([]byte(match))
+				hashStr := hex.EncodeToString(h[:])[:8]
+				placeholder := fmt.Sprintf("[%s_HASH_%s]", strings.ToUpper(pattern.Name), hashStr)
+				result = strings.ReplaceAll(result, match, placeholder)
 			}
 		}
 	}

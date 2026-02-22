@@ -293,6 +293,8 @@ func Run(cfg *config.Config, foreground bool) error {
 
 	streamTimeout := time.Duration(cfg.Server.StreamTimeout) * time.Second
 
+	sessionTTL := time.Duration(cfg.Server.SessionTTL) * time.Second
+
 	proxyHandler := proxy.NewProxyHandler(
 		chain, upstreamClient, log.Logger, collector, tok, st,
 		cfg.Server.MaxBodySize,
@@ -301,6 +303,8 @@ func Run(cfg *config.Config, foreground bool) error {
 		cbRegistry,
 		retryConfig,
 		rtr,
+		cfg.Server.MaxStreamSessions,
+		sessionTTL,
 	)
 
 	proxyAddr := fmt.Sprintf(":%d", cfg.Server.ProxyPort)
@@ -309,8 +313,9 @@ func Run(cfg *config.Config, foreground bool) error {
 	idleTimeout := time.Duration(cfg.Server.IdleTimeout) * time.Second
 	proxyServer := proxy.NewServer(proxyHandler, proxyAddr, readTimeout, writeTimeout, idleTimeout, cfg.Tracing.Enabled)
 
-	// Start cache purger (reuses the pruneCtx).
+	// Start cache purger and session reaper (reuse pruneCtx).
 	purgerDone := cacheMW.StartPurger(pruneCtx)
+	reaperDone := proxyHandler.StartSessionReaper(pruneCtx)
 
 	// Channel to collect server startup errors.
 	errCh := make(chan error, 2)
@@ -424,6 +429,7 @@ drained:
 	// 12. Clean up — wait for background goroutines before closing the store.
 	pruneCancel()
 	<-purgerDone
+	<-reaperDone
 	<-prunerDone
 	st.Close()
 	if err := RemovePID(dataDir); err != nil {

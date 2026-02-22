@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -59,21 +60,30 @@ func (s *StreamSession) Send(data []byte) error {
 
 // StreamManager manages active streaming sessions.
 type StreamManager struct {
-	sessions map[string]*StreamSession
-	mu       sync.RWMutex
+	sessions    map[string]*StreamSession
+	mu          sync.RWMutex
+	maxSessions int
+	sessionTTL  time.Duration
 }
 
-// NewStreamManager creates a new StreamManager.
-func NewStreamManager() *StreamManager {
+// NewStreamManager creates a new StreamManager with the given session limits.
+func NewStreamManager(maxSessions int, sessionTTL time.Duration) *StreamManager {
 	return &StreamManager{
-		sessions: make(map[string]*StreamSession),
+		sessions:    make(map[string]*StreamSession),
+		maxSessions: maxSessions,
+		sessionTTL:  sessionTTL,
 	}
 }
 
 // Create creates a new streaming session for the given model and provider.
-func (m *StreamManager) Create(model string, provider ProviderConfig) *StreamSession {
+// Returns an error if the maximum number of sessions has been reached.
+func (m *StreamManager) Create(model string, provider ProviderConfig) (*StreamSession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.maxSessions > 0 && len(m.sessions) >= m.maxSessions {
+		return nil, fmt.Errorf("stream session limit reached (max %d)", m.maxSessions)
+	}
 
 	session := &StreamSession{
 		ID:        uuid.New().String(),
@@ -83,7 +93,43 @@ func (m *StreamManager) Create(model string, provider ProviderConfig) *StreamSes
 		messages:  make(chan []byte, 256),
 	}
 	m.sessions[session.ID] = session
-	return session
+	return session, nil
+}
+
+// StartReaper starts a background goroutine that periodically removes expired
+// sessions. It returns a channel that is closed when the reaper exits.
+func (m *StreamManager) StartReaper(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.reap()
+			}
+		}
+	}()
+	return done
+}
+
+// reap removes sessions that have exceeded their TTL.
+func (m *StreamManager) reap() {
+	if m.sessionTTL <= 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for id, s := range m.sessions {
+		if now.Sub(s.CreatedAt) > m.sessionTTL {
+			s.Close()
+			delete(m.sessions, id)
+		}
+	}
 }
 
 // Get returns the session with the given ID, or nil if not found.
@@ -156,7 +202,11 @@ func (h *ProxyHandler) HandleStreamCreate(w http.ResponseWriter, r *http.Request
 		Format:  pc.Format,
 	}
 
-	session := h.streams.Create(req.Model, provider)
+	session, createErr := h.streams.Create(req.Model, provider)
+	if createErr != nil {
+		writeJSONError(w, http.StatusTooManyRequests, "stream session limit reached")
+		return
+	}
 
 	resp := streamCreateResponse{
 		ID:        session.ID,

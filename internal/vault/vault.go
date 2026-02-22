@@ -78,6 +78,7 @@ func (v *Vault) List() ([]string, error) {
 //   - "keyring://tokenman/<provider>" (preferred)
 //   - "keychain:tokenman/<provider>" (legacy)
 //   - "env:VARIABLE_NAME" (environment variable)
+//   - "file:///path/to/key" (plain-text file)
 func (v *Vault) ResolveKeyRef(keyRef string) (string, error) {
 	// Format 1: keyring://tokenman/<provider>
 	if strings.HasPrefix(keyRef, "keyring://") {
@@ -108,5 +109,19 @@ func (v *Vault) ResolveKeyRef(keyRef string) (string, error) {
 		return "", fmt.Errorf("environment variable %q is not set", envVar)
 	}
 
-	return "", fmt.Errorf("invalid key reference format: %q (expected \"keyring://tokenman/<provider>\", \"keychain:tokenman/<provider>\", or \"env:VARIABLE_NAME\")", keyRef)
+	// Format 4: file:///path/to/key
+	if strings.HasPrefix(keyRef, "file://") {
+		filePath := strings.TrimPrefix(keyRef, "file://")
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("reading key file %q: %w", filePath, err)
+		}
+		key := strings.TrimSpace(string(data))
+		if key == "" {
+			return "", fmt.Errorf("key file %q is empty", filePath)
+		}
+		return key, nil
+	}
+
+	return "", fmt.Errorf("invalid key reference format: %q (expected \"keyring://tokenman/<provider>\", \"keychain:tokenman/<provider>\", \"env:VARIABLE_NAME\", or \"file:///path/to/key\")", keyRef)
 }

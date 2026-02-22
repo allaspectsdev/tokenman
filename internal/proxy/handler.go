@@ -79,6 +79,8 @@ func NewProxyHandler(
 	cbRegistry *CircuitBreakerRegistry,
 	retryConfig RetryConfig,
 	rtr *router.Router,
+	maxStreamSessions int,
+	sessionTTL time.Duration,
 ) *ProxyHandler {
 	return &ProxyHandler{
 		chain:           chain,
@@ -88,13 +90,19 @@ func NewProxyHandler(
 		collector:       collector,
 		tokenizer:       tok,
 		store:           st,
-		streams:         NewStreamManager(),
+		streams:         NewStreamManager(maxStreamSessions, sessionTTL),
 		maxBodySize:     maxBodySize,
 		maxResponseSize: maxResponseSize,
 		streamTimeout:   streamTimeout,
 		cbRegistry:      cbRegistry,
 		retryConfig:     retryConfig,
 	}
+}
+
+// StartSessionReaper starts the stream session reaper and returns a channel
+// that is closed when the reaper exits.
+func (h *ProxyHandler) StartSessionReaper(ctx context.Context) <-chan struct{} {
+	return h.streams.StartReaper(ctx)
 }
 
 
@@ -128,22 +136,24 @@ func (h *ProxyHandler) forwardWithRetry(ctx context.Context, pipeReq *pipeline.R
 			}
 
 			// Apply per-provider timeout via context for non-streaming requests.
-			fwdCtx := ctx
-			if cand.Timeout > 0 && !pipeReq.Stream {
-				var cancel context.CancelFunc
-				fwdCtx, cancel = context.WithTimeout(ctx, cand.Timeout)
-				defer cancel()
-			}
-
-			resp, err := h.client.Forward(fwdCtx, pipeReq, cand.BaseURL, cand.APIKey)
-			if err != nil {
-				lastErr = err
+			// Wrapped in an anonymous function so defer cancel() is scoped per iteration.
+			resp, fwdErr := func() (*http.Response, error) {
+				fwdCtx := ctx
+				if cand.Timeout > 0 && !pipeReq.Stream {
+					var cancel context.CancelFunc
+					fwdCtx, cancel = context.WithTimeout(ctx, cand.Timeout)
+					defer cancel()
+				}
+				return h.client.Forward(fwdCtx, pipeReq, cand.BaseURL, cand.APIKey)
+			}()
+			if fwdErr != nil {
+				lastErr = fwdErr
 				cb.RecordFailure()
 				if h.collector != nil {
 					h.collector.RecordProviderRequest(cand.Name, "error")
 					h.collector.SetCircuitState(cand.Name, float64(cb.State()))
 				}
-				logger.Warn().Err(err).Str("provider", cand.Name).Int("attempt", attempt+1).Msg("upstream forward error, retrying")
+				logger.Warn().Err(fwdErr).Str("provider", cand.Name).Int("attempt", attempt+1).Msg("upstream forward error, retrying")
 				continue
 			}
 
@@ -309,6 +319,15 @@ func (h *ProxyHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Enrich the current trace span with request-level attributes.
 	tracing.SetRequestAttributes(ctx, requestID, pipeReq.Model, string(format), pipeReq.Stream)
+
+	// Resolve the provider name and inject it into metadata so middleware
+	// (e.g. rate limiting) can use it instead of model-prefix heuristics.
+	if resolved, resolveErr := h.router.Resolve(pipeReq.Model); resolveErr == nil {
+		if pipeReq.Metadata == nil {
+			pipeReq.Metadata = make(map[string]interface{})
+		}
+		pipeReq.Metadata["provider"] = resolved.Name
+	}
 
 	logger.Info().Msg("processing request")
 
@@ -894,7 +913,7 @@ func rebuildAnthropicBody(req *pipeline.Request) []byte {
 			// Skip internal keys.
 			if k == "cache_key" || k == "cached_response" || k == "cached_tokens_saved" ||
 				k == "pii_detections" || k == "pii_mapping" || k == "injection_detections" ||
-				k == "request_type" || k == "original_model" ||
+				k == "request_type" || k == "original_model" || k == "provider" ||
 				strings.HasPrefix(k, "cache_") || strings.HasPrefix(k, "budget_") ||
 				strings.HasPrefix(k, "history_") || strings.HasPrefix(k, "rules_") {
 				continue

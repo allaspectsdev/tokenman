@@ -343,6 +343,68 @@ func TestPII_BlockActionNoPII(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Hash action replaces PII with hashed placeholders
+// ---------------------------------------------------------------------------
+
+func TestPII_HashActionReplacesPII(t *testing.T) {
+	mw := NewPIIMiddleware("hash", nil, true)
+	req := &pipeline.Request{
+		Messages: []pipeline.Message{
+			{Role: "user", Content: "Contact me at user@example.com please"},
+		},
+	}
+
+	out, err := mw.ProcessRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ProcessRequest: %v", err)
+	}
+
+	content := out.Messages[0].Content.(string)
+	if strings.Contains(content, "user@example.com") {
+		t.Error("expected email to be hashed")
+	}
+	if !strings.Contains(content, "[EMAIL_HASH_") {
+		t.Errorf("expected [EMAIL_HASH_*] placeholder, got: %s", content)
+	}
+}
+
+func TestPII_HashActionDoesNotRestoreOnResponse(t *testing.T) {
+	mw := NewPIIMiddleware("hash", nil, true)
+	req := &pipeline.Request{
+		Messages: []pipeline.Message{
+			{Role: "user", Content: "Email me at secret@example.com"},
+		},
+	}
+
+	out, err := mw.ProcessRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ProcessRequest: %v", err)
+	}
+
+	content := out.Messages[0].Content.(string)
+	if strings.Contains(content, "secret@example.com") {
+		t.Fatal("expected email to be hashed")
+	}
+
+	// Simulate a response containing the hash placeholder.
+	resp := &pipeline.Response{
+		StatusCode: 200,
+		Body:       []byte(content),
+	}
+
+	outResp, err := mw.ProcessResponse(context.Background(), out, resp)
+	if err != nil {
+		t.Fatalf("ProcessResponse: %v", err)
+	}
+
+	// Hash is one-way — the original value should NOT be restored.
+	restored := string(outResp.Body)
+	if strings.Contains(restored, "secret@example.com") {
+		t.Error("hash action should not restore original PII in response")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Log action doesn't modify content but records detections
 // ---------------------------------------------------------------------------
 

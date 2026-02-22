@@ -2,6 +2,7 @@ package vault
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -102,6 +103,48 @@ func TestGet_EnvFallback(t *testing.T) {
 	}
 	if got != expected {
 		t.Errorf("got %q, want %q", got, expected)
+	}
+}
+
+func TestResolveKeyRef_FileFormat(t *testing.T) {
+	v := New()
+
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "api-key.txt")
+	if err := os.WriteFile(keyFile, []byte("sk-file-secret-key\n"), 0o600); err != nil {
+		t.Fatalf("writing key file: %v", err)
+	}
+
+	got, err := v.ResolveKeyRef("file://" + keyFile)
+	if err != nil {
+		t.Fatalf("ResolveKeyRef(file://): %v", err)
+	}
+	if got != "sk-file-secret-key" {
+		t.Errorf("got %q, want %q", got, "sk-file-secret-key")
+	}
+}
+
+func TestResolveKeyRef_FileFormat_NotFound(t *testing.T) {
+	v := New()
+
+	_, err := v.ResolveKeyRef("file:///nonexistent/path/key.txt")
+	if err == nil {
+		t.Fatal("expected error for missing key file")
+	}
+}
+
+func TestResolveKeyRef_FileFormat_Empty(t *testing.T) {
+	v := New()
+
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "empty-key.txt")
+	if err := os.WriteFile(keyFile, []byte("  \n"), 0o600); err != nil {
+		t.Fatalf("writing key file: %v", err)
+	}
+
+	_, err := v.ResolveKeyRef("file://" + keyFile)
+	if err == nil {
+		t.Fatal("expected error for empty key file")
 	}
 }
 

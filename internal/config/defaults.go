@@ -52,6 +52,12 @@ const DefaultMaxResponseSize int64 = 100 << 20
 // DefaultStreamTimeout is the default streaming connection timeout in seconds (10 min).
 const DefaultStreamTimeout = 600
 
+// DefaultMaxStreamSessions is the default maximum number of concurrent stream sessions.
+const DefaultMaxStreamSessions = 100
+
+// DefaultSessionTTL is the default stream session time-to-live in seconds (1 hour).
+const DefaultSessionTTL = 3600
+
 // DefaultRetryMaxAttempts is the default maximum number of retry attempts per provider.
 const DefaultRetryMaxAttempts = 3
 
@@ -108,9 +114,11 @@ func DefaultConfig() *Config {
 			ReadTimeout:     DefaultReadTimeout,
 			WriteTimeout:    DefaultWriteTimeout,
 			IdleTimeout:     DefaultIdleTimeout,
-			MaxBodySize:     DefaultMaxBodySize,
-			MaxResponseSize: DefaultMaxResponseSize,
-			StreamTimeout:   DefaultStreamTimeout,
+			MaxBodySize:       DefaultMaxBodySize,
+			MaxResponseSize:   DefaultMaxResponseSize,
+			StreamTimeout:     DefaultStreamTimeout,
+			MaxStreamSessions: DefaultMaxStreamSessions,
+			SessionTTL:        DefaultSessionTTL,
 		},
 		Auth: AuthConfig{
 			Enabled: false,

@@ -60,7 +60,7 @@ token = ""
 # Each provider is a table under [providers.<key>].
 # key_ref supports:
 #   keyring://tokenman/<provider>   – OS keyring (recommended)
-#   env://ENV_VAR_NAME              – environment variable
+#   env:VARIABLE_NAME               – environment variable
 #   file:///path/to/key             – plain-text file (not recommended)
 
 [providers.anthropic]

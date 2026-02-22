@@ -91,7 +91,8 @@ func TestResolveWithFallback_ReturnsMultipleOrdered(t *testing.T) {
 	modelMap := map[string]string{}
 	r := NewRouter(providers, modelMap, "anthropic", true)
 
-	results, err := r.ResolveWithFallback("claude-3-opus")
+	// Use claude-3-sonnet which is in both anthropic (pri=1) and backup (pri=3).
+	results, err := r.ResolveWithFallback("claude-3-sonnet")
 	if err != nil {
 		t.Fatalf("ResolveWithFallback error: %v", err)
 	}
@@ -166,6 +167,87 @@ func TestListModels_DeduplicatedAndSorted(t *testing.T) {
 		if models[i] != exp {
 			t.Fatalf("expected model[%d]=%q, got %q", i, exp, models[i])
 		}
+	}
+}
+
+func TestResolveWithFallback_FiltersUnsupportedModels(t *testing.T) {
+	providers := makeProviders()
+	modelMap := map[string]string{}
+	r := NewRouter(providers, modelMap, "anthropic", true)
+
+	// Resolve with fallback for a model only supported by anthropic.
+	results, err := r.ResolveWithFallback("claude-3-opus")
+	if err != nil {
+		t.Fatalf("ResolveWithFallback error: %v", err)
+	}
+
+	// Primary should be anthropic.
+	if results[0].Name != "anthropic" {
+		t.Fatalf("expected primary 'anthropic', got %q", results[0].Name)
+	}
+
+	// Fallbacks should not include openai (doesn't support claude-3-opus and has explicit model list).
+	for _, p := range results[1:] {
+		if p.Name == "openai" {
+			t.Fatalf("openai should not be a fallback for claude-3-opus (not in its model list)")
+		}
+	}
+
+	// backup has claude-3-sonnet but NOT claude-3-opus, so it should be excluded too.
+	for _, p := range results[1:] {
+		if p.Name == "backup" {
+			t.Fatalf("backup should not be a fallback for claude-3-opus (not in its model list)")
+		}
+	}
+}
+
+func TestResolveWithFallback_IncludesWildcardProviders(t *testing.T) {
+	providers := map[string]*ProviderConfig{
+		"primary": {
+			Name:     "primary",
+			BaseURL:  "https://primary.example.com",
+			Models:   []string{"model-a"},
+			Enabled:  true,
+			Priority: 1,
+		},
+		"wildcard": {
+			Name:     "wildcard",
+			BaseURL:  "https://wildcard.example.com",
+			Models:   []string{}, // empty list = accepts anything
+			Enabled:  true,
+			Priority: 2,
+		},
+		"specific": {
+			Name:     "specific",
+			BaseURL:  "https://specific.example.com",
+			Models:   []string{"model-b"},
+			Enabled:  true,
+			Priority: 3,
+		},
+	}
+	r := NewRouter(providers, nil, "primary", true)
+
+	results, err := r.ResolveWithFallback("model-a")
+	if err != nil {
+		t.Fatalf("ResolveWithFallback error: %v", err)
+	}
+
+	// Wildcard (empty Models) should be included as fallback.
+	hasWildcard := false
+	hasSpecific := false
+	for _, p := range results[1:] {
+		if p.Name == "wildcard" {
+			hasWildcard = true
+		}
+		if p.Name == "specific" {
+			hasSpecific = true
+		}
+	}
+	if !hasWildcard {
+		t.Fatal("expected wildcard provider (empty Models list) to be included as fallback")
+	}
+	if hasSpecific {
+		t.Fatal("expected specific provider (doesn't support model-a) to be excluded from fallbacks")
 	}
 }
 

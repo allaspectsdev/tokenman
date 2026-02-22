@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/allaspectsdev/tokenman/internal/pipeline"
 )
 
@@ -161,8 +163,7 @@ func (b *BudgetMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Re
 	for _, period := range b.limits {
 		start := periodStart(period.Name)
 		if err := b.store.AddSpending(period.Name, start, cost, period.Limit); err != nil {
-			// Log but do not fail the response.
-			_ = err
+			log.Error().Err(err).Str("period", period.Name).Msg("failed to record budget spending")
 		}
 	}
 

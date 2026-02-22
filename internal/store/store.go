@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // SQLite driver
@@ -15,9 +16,10 @@ import (
 // MaxOpenConns=1 for serialised writes, and a separate reader pool
 // for concurrent reads.
 type Store struct {
-	writer *sql.DB
-	reader *sql.DB
-	path   string
+	writer    *sql.DB
+	reader    *sql.DB
+	path      string
+	closeOnce sync.Once
 }
 
 // Open creates a new Store backed by the SQLite database at path.
@@ -80,18 +82,21 @@ func Open(path string) (*Store, error) {
 }
 
 // Close closes both the writer and reader database connections.
+// It is safe to call Close multiple times.
 func (s *Store) Close() error {
 	var firstErr error
-	if s.writer != nil {
-		if err := s.writer.Close(); err != nil && firstErr == nil {
-			firstErr = err
+	s.closeOnce.Do(func() {
+		if s.writer != nil {
+			if err := s.writer.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		}
-	}
-	if s.reader != nil {
-		if err := s.reader.Close(); err != nil && firstErr == nil {
-			firstErr = err
+		if s.reader != nil {
+			if err := s.reader.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		}
-	}
+	})
 	return firstErr
 }
 

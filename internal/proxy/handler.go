@@ -932,11 +932,13 @@ func rebuildAnthropicBody(req *pipeline.Request) []byte {
 }
 
 func rebuildOpenAIBody(req *pipeline.Request) []byte {
-	body := map[string]interface{}{
-		"model":    req.Model,
-		"messages": req.Messages,
-		"stream":   req.Stream,
+	var body map[string]interface{}
+	if err := json.Unmarshal(req.RawBody, &body); err != nil {
+		body = make(map[string]interface{})
 	}
+	body["model"] = req.Model
+	body["messages"] = req.Messages
+	body["stream"] = req.Stream
 	if req.MaxTokens > 0 {
 		body["max_tokens"] = req.MaxTokens
 	}
@@ -948,7 +950,7 @@ func rebuildOpenAIBody(req *pipeline.Request) []byte {
 	}
 	data, err := json.Marshal(body)
 	if err != nil {
-		return req.RawBody // fallback to original
+		return req.RawBody
 	}
 	return data
 }

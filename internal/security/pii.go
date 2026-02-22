@@ -235,7 +235,7 @@ func (p *PIIMiddleware) scanAndProcess(text, fieldPath string, mapping *PIIMappi
 
 			detections = append(detections, PIIDetection{
 				Type:      pattern.Name,
-				Value:     match,
+				Value:     maskValue(match),
 				FieldPath: fieldPath,
 			})
 
@@ -253,6 +253,15 @@ func (p *PIIMiddleware) scanAndProcess(text, fieldPath string, mapping *PIIMappi
 	}
 
 	return result, detections
+}
+
+// maskValue masks the interior of a string, showing only the first 2 and last 2
+// characters. Values of 4 characters or fewer are fully masked.
+func maskValue(s string) string {
+	if len(s) <= 4 {
+		return strings.Repeat("*", len(s))
+	}
+	return s[:2] + strings.Repeat("*", len(s)-4) + s[len(s)-2:]
 }
 
 // MarshalDetections serializes PII detections from request metadata to JSON.

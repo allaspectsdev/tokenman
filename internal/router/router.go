@@ -83,7 +83,7 @@ func (r *Router) ResolveWithFallback(model string) ([]*ProviderConfig, error) {
 		return []*ProviderConfig{primary}, nil
 	}
 
-	// Collect all enabled providers except the primary.
+	// Collect all enabled providers except the primary that support the model.
 	var fallbacks []*ProviderConfig
 	for _, p := range r.providers {
 		if !p.Enabled {
@@ -91,6 +91,9 @@ func (r *Router) ResolveWithFallback(model string) ([]*ProviderConfig, error) {
 		}
 		if p.Name == primary.Name {
 			continue
+		}
+		if !p.SupportsModel(model) && len(p.Models) > 0 {
+			continue // Skip providers that explicitly don't support this model
 		}
 		fallbacks = append(fallbacks, p)
 	}

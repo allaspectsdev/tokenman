@@ -84,7 +84,6 @@ func Run(cfg *config.Config, foreground bool) error {
 	if err != nil {
 		return fmt.Errorf("opening store: %w", err)
 	}
-	defer st.Close()
 
 	log.Info().Str("db_path", dbPath).Msg("store opened")
 

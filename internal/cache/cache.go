@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -40,7 +41,7 @@ type CacheStore interface {
 type CacheMiddleware struct {
 	memory  *lru.Cache[string, *CacheEntry]
 	store   CacheStore
-	ttl     time.Duration
+	ttl     atomic.Int64 // stores nanoseconds
 	enabled bool
 }
 
@@ -63,12 +64,13 @@ func NewCacheMiddleware(store CacheStore, ttlSeconds int, maxMemoryEntries int, 
 		return nil, fmt.Errorf("cache: creating LRU: %w", err)
 	}
 
-	return &CacheMiddleware{
+	c := &CacheMiddleware{
 		memory:  memCache,
 		store:   store,
-		ttl:     time.Duration(ttlSeconds) * time.Second,
 		enabled: enabled,
-	}, nil
+	}
+	c.ttl.Store(int64(time.Duration(ttlSeconds) * time.Second))
+	return c, nil
 }
 
 // Name returns the middleware name.
@@ -181,7 +183,7 @@ func (c *CacheMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Req
 		ContentType: "application/json",
 		Model:       req.Model,
 		CreatedAt:   now,
-		ExpiresAt:   now.Add(c.ttl),
+		ExpiresAt:   now.Add(time.Duration(c.ttl.Load())),
 		TokensSaved: req.TokensIn + resp.TokensOut,
 	}
 
@@ -191,8 +193,7 @@ func (c *CacheMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Req
 	// Store in persistent backend.
 	if c.store != nil {
 		if err := c.store.SetCache(key, entry); err != nil {
-			// Log but do not fail the response.
-			_ = err
+			log.Error().Err(err).Str("key", key).Msg("failed to persist cache entry")
 		}
 	}
 
@@ -202,7 +203,7 @@ func (c *CacheMiddleware) ProcessResponse(ctx context.Context, req *pipeline.Req
 // SetTTL updates the cache TTL for new entries. Existing cached entries retain
 // their original expiration. This is called when the config is hot-reloaded.
 func (c *CacheMiddleware) SetTTL(ttlSeconds int) {
-	c.ttl = time.Duration(ttlSeconds) * time.Second
+	c.ttl.Store(int64(time.Duration(ttlSeconds) * time.Second))
 }
 
 // StartPurger starts a background goroutine that periodically purges expired
@@ -240,7 +241,9 @@ func (c *CacheMiddleware) StartPurger(ctx context.Context) <-chan struct{} {
 func (c *CacheMiddleware) purge() {
 	// Purge persistent store.
 	if c.store != nil {
-		_ = c.store.DeleteExpired()
+		if err := c.store.DeleteExpired(); err != nil {
+			log.Error().Err(err).Msg("failed to purge expired cache entries")
+		}
 	}
 
 	// Evict expired entries from the in-memory LRU.

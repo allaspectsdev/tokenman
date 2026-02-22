@@ -436,12 +436,12 @@ func TestPII_LogActionPreservesContent(t *testing.T) {
 
 	found := false
 	for _, d := range dets {
-		if d.Type == "EMAIL" && d.Value == "user@example.com" {
+		if d.Type == "EMAIL" && d.Value == maskValue("user@example.com") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("expected EMAIL detection for user@example.com")
+		t.Errorf("expected EMAIL detection with masked value %q", maskValue("user@example.com"))
 	}
 }
